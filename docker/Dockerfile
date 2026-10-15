@@ -40,12 +40,10 @@ COPY public ./public
 COPY src ./src
 COPY .htaccess ./
 COPY custom/muckiware ./custom/muckiware
-
-# muckidrive ships custom/muckiware/restic (PHP restic client, path repo).
-# Plugins are cloned from their public GitHub tags.
-RUN git clone --depth 1 --branch v0.7.0 https://github.com/muckiware/MuckiFacilityPlugin.git custom/plugins/MuckiFacilityPlugin \
- && git clone --depth 1 --branch v2.4.0 https://github.com/muckiware/MuckiLogPlugin.git custom/plugins/MuckiLogPlugin \
- && rm -rf custom/plugins/MuckiFacilityPlugin/.git custom/plugins/MuckiLogPlugin/.git
+# Plugins are committed in the repository: MuckiFacilityPlugin v0.7.0 and
+# MuckiLogPlugin v2.4.0 with the storefront decorator service removed
+# (see comment below) — no GitHub clones at build time.
+COPY custom/plugins ./custom/plugins
 
 # muckidrive does not load the Shopware storefront bundle. The MuckiLogPlugin
 # storefront ErrorControllerDecorator (shipped in v2.4.0) decorates a service

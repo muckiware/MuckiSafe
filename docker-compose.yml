@@ -52,7 +52,9 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost/admin/login || exit 1"]
+      # /admin is the administration entry (SPA); /admin/login is NOT a route
+      # on muckidrive (no storefront) and would 404 forever.
+      test: ["CMD-SHELL", "curl -fsS http://localhost/admin || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5

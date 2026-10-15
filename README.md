@@ -76,11 +76,12 @@ docker build -f docker/Dockerfile -t muckisafe:local .
 docker run --rm -it -e DATABASE_URL=... muckisafe:local
 ```
 
-The Dockerfile clones the plugins from their public GitHub tags
-(`MuckiFacilityPlugin` v0.7.0, `MuckiLogPlugin` v2.4.0, `muckiware/restic` v1.5.0)
-and applies one muckidrive-specific patch: the `MuckiLogPlugin` storefront
-`ErrorControllerDecorator` service definition is removed, because muckidrive does not
-load the Shopware storefront bundle. See `docker/Dockerfile` for details.
+The Dockerfile builds from the muckidrive repository — the plugins
+(MuckiFacilityPlugin v0.7.0, MuckiLogPlugin v2.4.0) and the restic PHP library
+(v1.5.0) are committed under `custom/` in that repository. One muckidrive-specific
+patch is applied there: the MuckiLogPlugin storefront `ErrorControllerDecorator`
+service definition is removed, because muckidrive does not load the Shopware
+storefront bundle. See `docker/Dockerfile` for details.
 
 ## How the image is built & published
 
