@@ -1,0 +1,106 @@
+# MuckiSafe — self-hosted backup & maintenance server
+#
+# Quick start:
+#   curl -O https://raw.githubusercontent.com/muckiware/MuckiSafe/main/docker-compose.yml
+#   curl -O https://raw.githubusercontent.com/muckiware/MuckiSafe/main/.env.example
+#   cp .env.example .env        # edit values!
+#   docker compose up -d
+#   -> http://localhost:8080/admin
+#
+# Build the image yourself instead of pulling:
+#   git clone https://github.com/muckiware/muckidrive.git
+#   cd muckidrive
+#   docker build -f docker/Dockerfile -t muckisafe:local .
+
+name: muckisafe
+
+services:
+  app:
+    image: ghcr.io/muckiware/muckisafe:latest
+    build:
+      context: https://github.com/muckiware/muckidrive.git#main
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    environment:
+      APP_ENV: prod
+      APP_URL: ${APP_URL}
+      APP_SECRET: ${APP_SECRET}
+      INSTANCE_ID: ${INSTANCE_ID}
+      DATABASE_URL: mysql://${DB_USER:-muckisafe}:${DB_PASSWORD}@db:3306/${DB_NAME:-muckisafe}?serverVersion=11.8
+      MUCKIWARE_ROOT: /var/www/html
+      MAILER_DSN: ${MAILER_DSN:-null://null}
+      # MuckiFacilityPlugin: encryption key for repository passwords.
+      # Generate:  openssl rand -hex 32
+      # Without this value encrypted repository passwords cannot be read back!
+      MUWA_FACILITY_SECRET: ${MUWA_FACILITY_SECRET}
+      # First-boot admin account (created only on initial installation)
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      SHOP_NAME: ${SHOP_NAME:-MuckiSafe}
+      SHOP_EMAIL: ${SHOP_EMAIL:-admin@example.com}
+      SHOP_LOCALE: ${SHOP_LOCALE:-en-GB}
+      SHOP_CURRENCY: ${SHOP_CURRENCY:-EUR}
+    volumes:
+      - app-var:/var/www/html/var
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/admin/login || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+  worker:
+    # Scheduled tasks: log email dispatch (MuckiLogPlugin),
+    # backup runs + snapshot cleanups (MuckiFacilityPlugin).
+    image: ghcr.io/muckiware/muckisafe:latest
+    restart: unless-stopped
+    environment:
+      APP_ENV: prod
+      APP_URL: ${APP_URL}
+      APP_SECRET: ${APP_SECRET}
+      INSTANCE_ID: ${INSTANCE_ID}
+      DATABASE_URL: mysql://${DB_USER:-muckisafe}:${DB_PASSWORD}@db:3306/${DB_NAME:-muckisafe}?serverVersion=11.8
+      MUCKIWARE_ROOT: /var/www/html
+      MUWA_FACILITY_SECRET: ${MUWA_FACILITY_SECRET}
+      MAILER_DSN: ${MAILER_DSN:-null://null}
+    volumes:
+      - app-var:/var/www/html/var
+    depends_on:
+      app:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    # skip the entrypoint's install logic; run the scheduler in a loop instead
+    entrypoint: ["sh", "-c", "while true; do bin/console scheduled-task:run --no-wait; sleep $${TASK_SLEEP:-290}; done"]
+
+  db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-muckisafe}
+      MARIADB_USER: ${DB_USER:-muckisafe}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_ROOT_HOST: "127.0.0.1"
+    volumes:
+      - db-data:/var/lib/mysql
+    command:
+      - --sql_mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+      - --log_bin_trust_function_creators=1
+      - --default-time-zone=+00:00
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  app-var:
+  db-data:
