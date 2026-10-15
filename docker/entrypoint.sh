@@ -35,7 +35,7 @@ export MUCKIWARE_ROOT="${MUCKIWARE_ROOT:-/var/www/html}"
 
 if ! bin/console system:is-installed >/dev/null 2>&1; then
     log "System not installed - running system:install ..."
-    bin/console system:install \
+    bin/console system:install -n \
         --create-database \
         --shop-name "${SHOP_NAME:-MuckiSafe}" \
         --shop-email "${SHOP_EMAIL:-admin@example.com}" \
@@ -45,13 +45,13 @@ if ! bin/console system:is-installed >/dev/null 2>&1; then
         --skip-first-run-wizard \
         --no-assign-theme
 
-    bin/console plugin:refresh
-    bin/console plugin:install --activate MuckiLogPlugin MuckiFacilityPlugin
-    bin/console scheduled-task:register
+    bin/console -n plugin:refresh
+    bin/console -n plugin:install --activate MuckiLogPlugin MuckiFacilityPlugin
+    bin/console -n scheduled-task:register
 
     if [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_PASSWORD" ]; then
         log "Creating admin user '${ADMIN_USERNAME}' ..."
-        bin/console user:create \
+        bin/console -n user:create \
             --admin \
             --password "$ADMIN_PASSWORD" \
             --email "${ADMIN_EMAIL:-admin@example.com}" \
@@ -62,7 +62,10 @@ if ! bin/console system:is-installed >/dev/null 2>&1; then
         log "NOTE: no ADMIN_USERNAME/ADMIN_PASSWORD set - create your user with 'bin/console user:create'."
     fi
 
-    bin/console cache:clear
+    bin/console -n cache:clear
+    # Files created above are owned by root (entrypoint user); the web server
+    # runs as www-data and needs write access to var/ (cache, logs).
+    chown -R www-data:www-data var public
     log "First installation finished."
 fi
 
