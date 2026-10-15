@@ -28,9 +28,9 @@ services:
       APP_URL: ${APP_URL}
       APP_SECRET: ${APP_SECRET}
       INSTANCE_ID: ${INSTANCE_ID}
-      # No serverVersion parameter here on purpose: it would make Doctrine
-      # treat MariaDB as MySQL 11.x and break schema introspection during
-      # migrations. Auto-detection (verified) picks the correct MariaDB platform.
+      # No serverVersion parameter on purpose: it would pin Doctrine to the
+      # wrong platform version string. Auto-detection (verified with MySQL 8.4)
+      # picks the correct platform and keeps schema introspection working.
       DATABASE_URL: mysql://${DB_USER:-muckisafe}:${DB_PASSWORD}@db:3306/${DB_NAME:-muckisafe}
       MUCKIWARE_ROOT: /var/www/html
       MAILER_DSN: ${MAILER_DSN:-null://null}
@@ -85,14 +85,15 @@ services:
     entrypoint: ["sh", "-c", "while true; do bin/console scheduled-task:run --no-wait; sleep $${TASK_SLEEP:-290}; done"]
 
   db:
-    image: mariadb:11.8
+    # MySQL 8.4 — the database muckidrive is developed and tested against
+    # (DDEV: mysql 8.4). Shopware-compatible settings from the DDEV config.
+    image: mysql:8.4
     restart: unless-stopped
     environment:
-      MARIADB_DATABASE: ${DB_NAME:-muckisafe}
-      MARIADB_USER: ${DB_USER:-muckisafe}
-      MARIADB_PASSWORD: ${DB_PASSWORD}
-      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
-      MARIADB_ROOT_HOST: "127.0.0.1"
+      MYSQL_DATABASE: ${DB_NAME:-muckisafe}
+      MYSQL_USER: ${DB_USER:-muckisafe}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
     volumes:
       - db-data:/var/lib/mysql
     command:
@@ -100,11 +101,11 @@ services:
       - --log_bin_trust_function_creators=1
       - --default-time-zone=+00:00
     healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p$$MYSQL_ROOT_PASSWORD --silent"]
       interval: 5s
       timeout: 5s
       retries: 20
-      start_period: 10s
+      start_period: 15s
 
 volumes:
   app-var:

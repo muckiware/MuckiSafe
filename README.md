@@ -14,7 +14,7 @@ What you get:
 - **MuckiFacilityPlugin** v0.7.0 — database backups, restic file backups, table cleanup
   (`muckiware:db:dump`, `muckiware:table:cleanup`, snapshot management)
 - **MuckiLogPlugin** v2.4.0 — rotating log files, log levels, optional email alerts
-- **MariaDB 11.8** and a **scheduled-task worker** for plugin background jobs
+- **MySQL 8.4** and a **scheduled-task worker** for plugin background jobs
 - First-boot installation: system + plugins + admin user are created automatically from
   environment variables — no SQL dump, no manual `system:install`
 
