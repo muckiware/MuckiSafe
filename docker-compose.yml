@@ -42,10 +42,10 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
-      SHOP_NAME: ${SHOP_NAME:-MuckiSafe}
-      SHOP_EMAIL: ${SHOP_EMAIL:-admin@example.com}
-      SHOP_LOCALE: ${SHOP_LOCALE:-en-GB}
-      SHOP_CURRENCY: ${SHOP_CURRENCY:-EUR}
+      PROJECT_NAME: ${PROJECT_NAME:-MuckiSafe}
+      PROJECT_EMAIL: ${PROJECT_EMAIL:-admin@example.com}
+      PROJECT_LOCALE: ${PROJECT_LOCALE:-en-GB}
+      PROJECT_CURRENCY: ${PROJECT_CURRENCY:-EUR}
     volumes:
       - app-var:/var/www/html/var
     depends_on:

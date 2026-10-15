@@ -43,7 +43,7 @@ Then open **http://localhost:8080/admin** and log in with `ADMIN_USERNAME` /
 | `DB_PASSWORD`, `DB_ROOT_PASSWORD` | ✅ | MySQL credentials |
 | `MUWA_FACILITY_SECRET` | ✅ | Encryption key for backup repository passwords — **without it, encrypted repository passwords cannot be restored, ever** |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | ✅ | Admin login, created on first boot |
-| `ADMIN_EMAIL`, `SHOP_NAME`, `SHOP_EMAIL`, `SHOP_LOCALE`, `SHOP_CURRENCY` | – | Basic data for the initial installation |
+| `ADMIN_EMAIL`, `PROJECT_NAME`, `PROJECT_EMAIL`, `PROJECT_LOCALE`, `PROJECT_CURRENCY` | – | Basic data for the initial installation |
 | `MAILER_DSN` | – | SMTP for MuckiLogPlugin email alerts (default `null://null`) |
 | `HTTP_PORT` | – | Host port for the admin UI (default `8080`) |
 

@@ -37,10 +37,10 @@ if ! bin/console system:is-installed >/dev/null 2>&1; then
     log "System not installed - running system:install ..."
     bin/console system:install -n \
         --create-database \
-        --shop-name "${SHOP_NAME:-MuckiSafe}" \
-        --shop-email "${SHOP_EMAIL:-admin@example.com}" \
-        --shop-locale "${SHOP_LOCALE:-en-GB}" \
-        --shop-currency "${SHOP_CURRENCY:-EUR}" \
+        --shop-name "${PROJECT_NAME:-MuckiSafe}" \
+        --shop-email "${PROJECT_EMAIL:-admin@example.com}" \
+        --shop-locale "${PROJECT_LOCALE:-en-GB}" \
+        --shop-currency "${PROJECT_CURRENCY:-EUR}" \
         --skip-assets-install \
         --skip-first-run-wizard \
         --no-assign-theme
