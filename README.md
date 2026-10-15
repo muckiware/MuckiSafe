@@ -40,7 +40,7 @@ Then open **http://localhost:8080/admin** and log in with `ADMIN_USERNAME` /
 | `APP_URL` | ✅ | Public URL of the instance (e.g. `https://muckisafe.example.com`) |
 | `APP_SECRET` | ✅ | `openssl rand -hex 32` |
 | `INSTANCE_ID` | ✅ | Random ID, `openssl rand -base64 24 \| tr -d /+` |
-| `DB_PASSWORD`, `DB_ROOT_PASSWORD` | ✅ | MariaDB credentials |
+| `DB_PASSWORD`, `DB_ROOT_PASSWORD` | ✅ | MySQL credentials |
 | `MUWA_FACILITY_SECRET` | ✅ | Encryption key for backup repository passwords — **without it, encrypted repository passwords cannot be restored, ever** |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | ✅ | Admin login, created on first boot |
 | `ADMIN_EMAIL`, `SHOP_NAME`, `SHOP_EMAIL`, `SHOP_LOCALE`, `SHOP_CURRENCY` | – | Basic data for the initial installation |
@@ -53,7 +53,7 @@ Then open **http://localhost:8080/admin** and log in with `ADMIN_USERNAME` /
 |---|---|
 | `app` | Apache + PHP-FPM, serves the administration under `/admin` |
 | `worker` | Runs `scheduled-task:run` every ~5 min: log mail dispatch, backup runs |
-| `db` | MariaDB 11.8 with Shopware-compatible settings |
+| `db` | MySQL 8.4 with Shopware-compatible settings |
 
 ## Upgrades
 
