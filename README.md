@@ -70,25 +70,30 @@ untouched. Plugin updates arrive via new image versions.
 ## Building the image yourself
 
 ```bash
-git clone https://github.com/muckiware/muckidrive.git
-cd muckidrive
+git clone https://github.com/muckiware/MuckiSafe.git
+cd MuckiSafe
+git clone https://github.com/muckiware/muckidrive.git muckidrive
 docker build -f docker/Dockerfile -t muckisafe:local .
-docker run --rm -it -e DATABASE_URL=... muckisafe:local
 ```
 
-The Dockerfile builds from the muckidrive repository — the plugins
-(MuckiFacilityPlugin v0.7.0, MuckiLogPlugin v2.4.0) and the restic PHP library
-(v1.5.0) are committed under `custom/` in that repository. One muckidrive-specific
-patch is applied there: the MuckiLogPlugin storefront `ErrorControllerDecorator`
-service definition is removed, because muckidrive does not load the Shopware
-storefront bundle. See `docker/Dockerfile` for details.
+The build context is the MuckiSafe repository with the muckidrive platform cloned
+into `./muckidrive` (the CI workflow does exactly this). The Dockerfile copies
+the platform skeleton from `muckidrive/`, then adds the Muckiware plugins at
+build time — cloned from their public GitHub tags (MuckiFacilityPlugin v0.7.0,
+MuckiLogPlugin v2.4.0, restic PHP client v1.5.0). One muckidrive-specific patch
+is applied during the build: the MuckiLogPlugin storefront
+`ErrorControllerDecorator` service definition is removed, because muckidrive
+does not load the Shopware storefront bundle. See `docker/Dockerfile` for details.
 
 ## How the image is built & published
 
-The GitHub workflow in this repository builds `ghcr.io/muckiware/muckisafe` from the
-[muckidrive](https://github.com/muckiware/muckidrive) repository (multi-arch
-`linux/amd64` + `linux/arm64`) on every push to `main` and on version tags `v*`.
-Tag builds are additionally published as `ghcr.io/muckiware/muckisafe:vX.Y.Z`.
+The GitHub workflow in this repository checks out MuckiSafe, clones the
+[muckidrive](https://github.com/muckiware/muckidrive) platform into `./muckidrive`
+and builds `ghcr.io/muckiware/muckisafe` (multi-arch `linux/amd64` +
+`linux/arm64`) on every push to `main`, on version tags `v*` and weekly
+(to pick up platform updates). Tag builds are additionally published as
+`ghcr.io/muckiware/muckisafe:vX.Y.Z`. A manual build with a specific platform
+version is possible via *Run workflow* (`muckidrive_ref` input).
 
 ## Reverse proxy / HTTPS
 
@@ -106,12 +111,15 @@ muckisafe.example.com {
 ```
 docker-compose.yml      End-user compose file (app + worker + db)
 .env.example            All configurable variables with explanations
+docker/Dockerfile       Image build: muckidrive platform + Muckiware plugins
+docker/entrypoint.sh    First-boot installation + Apache start
+.dockerignore           Build context filter
 .github/workflows/      Image build & publish to GHCR
-docs/                   Additional documentation
 ```
 
-The application code itself lives in [muckiware/muckidrive](https://github.com/muckiware/muckidrive);
-this repository only contains the Docker distribution layer.
+The application code itself lives in [muckiware/muckidrive](https://github.com/muckiware/muckidrive)
+(the base platform, Docker-free) — this repository contains everything Docker:
+build recipe, distribution and documentation.
 
 ## License
 

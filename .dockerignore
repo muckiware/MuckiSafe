@@ -1,0 +1,32 @@
+# Build context = MuckiSafe repository root (with muckidrive/ cloned inside).
+# Keep the context small and free of local artifacts.
+
+# VCS / IDE
+.git
+.github
+.idea
+.DS_Store
+**/.DS_Store
+
+# muckidrive checkout: everything the Dockerfile does not COPY
+muckidrive/.git
+muckidrive/.github
+muckidrive/.ddev
+muckidrive/.idea
+muckidrive/.playwright-mcp
+muckidrive/.claude
+muckidrive/vendor
+muckidrive/var/cache
+muckidrive/var/log
+muckidrive/public/bundles
+muckidrive/.env
+muckidrive/.env.*
+muckidrive/parameters.txt
+muckidrive/.uniqueid.txt
+muckidrive/install.lock
+muckidrive/custom/plugins/MuckiFacilityPlugin
+muckidrive/custom/plugins/MuckiLogPlugin
+muckidrive/custom/muckiware/restic
+muckidrive/custom/muckiware/core.zip
+**/node_modules
+**/.phpunit.result.cache

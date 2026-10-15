@@ -1,14 +1,30 @@
 name: Build and publish the MuckiSafe Docker image
 
+# The image combines the muckidrive platform (github.com/muckiware/muckidrive)
+# with the Muckiware facility and logging plugins into a ready-to-run backup
+# server. This workflow checks out MuckiSafe (Dockerfile, entrypoint, compose),
+# clones muckidrive into ./muckidrive as the application source and builds
+# ghcr.io/muckiware/muckisafe.
+
 on:
   push:
     branches: [main]
     tags: ['v*']
+  schedule:
+    - cron: '0 3 * * 1'   # weekly: pick up muckidrive/platform updates
   workflow_dispatch:
+    inputs:
+      muckidrive_ref:
+        description: 'muckidrive git ref to build from (branch or tag)'
+        required: false
+        default: 'main'
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: muckiware/muckisafe
+  # Passed via env (not interpolated into the shell command) to avoid
+  # command injection through the workflow_dispatch input.
+  MUCKIDRIVE_REF: ${{ github.event.inputs.muckidrive_ref || 'main' }}
 
 jobs:
   build:
@@ -17,6 +33,12 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Checkout MuckiSafe (build recipe)
+        uses: actions/checkout@v4
+
+      - name: Clone muckidrive platform (application source)
+        run: git clone --depth 1 --branch "$MUCKIDRIVE_REF" https://github.com/muckiware/muckidrive.git muckidrive
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -37,16 +59,16 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          # The image is built from the muckidrive application repository,
-          # not from this (MuckiSafe) checkout — no checkout step needed.
-          context: https://github.com/muckiware/muckidrive.git#main
+          context: .
           file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            MUCKIDRIVE_REF=${{ env.MUCKIDRIVE_REF }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -1,17 +1,31 @@
 # syntax=docker/dockerfile:1
 #
-# MuckiSafe image — muckidrive (Shopware 6.7 core framework, no shop context)
-# with MuckiFacilityPlugin and MuckiLogPlugin pre-installed.
+# MuckiSafe image — the muckidrive platform (Shopware 6.7 core framework,
+# no shop context) combined with the Muckiware facility and logging plugins
+# into a ready-to-run backup server.
 #
-# Build context = muckidrive repository root (needs: composer.json/composer.lock,
-# bin/, config/, files/, public/, src/, .htaccess, custom/muckiware/).
-# The plugins (MuckiFacilityPlugin v0.7.0, MuckiLogPlugin v2.4.0) and the restic
-# PHP library (v1.5.0) are committed in the repository under custom/.
+# Build context = this (MuckiSafe) repository root with the muckidrive
+# platform cloned into the ./muckidrive subdirectory. The CI workflow does
+# this automatically; locally run:
+#   git clone https://github.com/muckiware/muckidrive.git muckidrive
+#
+# Plugins are added at build time — they do NOT live in muckidrive (which is
+# a general platform):
+#   - MuckiFacilityPlugin (github.com/muckiware/MuckiFacilityPlugin, tag below)
+#   - MuckiLogPlugin     (github.com/muckiware/MuckiLogPlugin, tag below)
+# The restic PHP client library (muckiware/restic, no Packagist) is cloned as
+# well — the custom/muckiware/* path repo in muckidrive's composer.json
+# picks it up.
 
 # ---------------------------------------------------------------------------
 # Stage 1: dependencies + administration build (discarded afterwards)
 # ---------------------------------------------------------------------------
 FROM php:8.4-fpm-bookworm AS build
+
+ARG MUCKIDRIVE_REF=main
+ARG FACILITY_PLUGIN_REF=v0.7.0
+ARG LOG_PLUGIN_REF=v2.4.0
+ARG RESTIC_LIB_REF=v1.5.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git unzip curl jq ca-certificates \
@@ -31,27 +45,45 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 
 WORKDIR /var/www/html
 
-# Application skeleton (ordered for layer caching)
-COPY composer.json composer.lock symfony.lock ./
-COPY bin ./bin
-COPY config ./config
-COPY files ./files
-COPY public ./public
-COPY src ./src
-COPY .htaccess ./
-COPY custom/muckiware ./custom/muckiware
-# Plugins are committed in the repository: MuckiFacilityPlugin v0.7.0 and
-# MuckiLogPlugin v2.4.0 with the storefront decorator service removed
-# (see comment below) — no GitHub clones at build time.
-COPY custom/plugins ./custom/plugins
+# Platform skeleton from the muckidrive checkout inside the build context
+COPY muckidrive/composer.json muckidrive/composer.lock muckidrive/symfony.lock ./
+COPY muckidrive/bin ./bin
+COPY muckidrive/config ./config
+COPY muckidrive/files ./files
+COPY muckidrive/public ./public
+COPY muckidrive/src ./src
+COPY muckidrive/.htaccess ./
+COPY muckidrive/custom/muckiware ./custom/muckiware
+
+# --- MuckiSafe additions: plugins cloned from their public GitHub tags -----
+# Defensive cleanup first: local plugin checkouts inside the cloned
+# muckidrive tree (gitignored there) would collide with git clone.
+RUN rm -rf custom/muckiware/restic custom/plugins/MuckiFacilityPlugin custom/plugins/MuckiLogPlugin \
+ && git clone --depth 1 --branch ${FACILITY_PLUGIN_REF} https://github.com/muckiware/MuckiFacilityPlugin.git custom/plugins/MuckiFacilityPlugin \
+ && git clone --depth 1 --branch ${LOG_PLUGIN_REF} https://github.com/muckiware/MuckiLogPlugin.git custom/plugins/MuckiLogPlugin \
+ && git clone --depth 1 --branch ${RESTIC_LIB_REF} https://github.com/muckiware/restic.git custom/muckiware/restic \
+ && rm -rf custom/plugins/MuckiFacilityPlugin/.git custom/plugins/MuckiLogPlugin/.git custom/muckiware/restic/.git
 
 # muckidrive does not load the Shopware storefront bundle. The MuckiLogPlugin
 # storefront ErrorControllerDecorator (shipped in v2.4.0) decorates a service
 # that does not exist here and would break container compilation — the service
-# block is removed (tested against SW 6.7.15.1). The patched services.xml is
-# committed in the repository (custom/plugins/MuckiLogPlugin).
+# block is removed during the build (verified against SW 6.7.15.1).
+RUN sed -i '/<service id="MuckiLogPlugin\\Storefront\\Controller\\ErrorControllerDecorator"/,/<\/service>/d' \
+        custom/plugins/MuckiLogPlugin/src/Resources/config/services.xml \
+ && ! grep -q ErrorControllerDecorator custom/plugins/MuckiLogPlugin/src/Resources/config/services.xml \
+ && php -r 'exit(simplexml_load_file("custom/plugins/MuckiLogPlugin/src/Resources/config/services.xml") === false ? 1 : 0);' \
+ && echo "MuckiLogPlugin services.xml patched and valid"
 
-RUN composer install --no-dev --optimize-autoloader --no-interaction
+# Register both plugins with composer (path repos custom/plugins/*, same as DDEV)
+# custom/apps and custom/static-plugins are referenced by composer.json path
+# repositories — create them so composer does not fail on missing dirs.
+RUN mkdir -p custom/apps custom/static-plugins \
+ && composer require \
+        muckiware/facility-plugin:"*" \
+        muckiware/log-plugin:"*" \
+        --no-interaction --no-scripts \
+ && composer dump-autoload --optimize \
+ && composer install --no-dev --optimize-autoloader --no-interaction
 
 # Administration production build (no database required — verified:
 # bundle:dump, feature:dump, framework:schema and assets:install all run
