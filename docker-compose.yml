@@ -28,7 +28,10 @@ services:
       APP_URL: ${APP_URL}
       APP_SECRET: ${APP_SECRET}
       INSTANCE_ID: ${INSTANCE_ID}
-      DATABASE_URL: mysql://${DB_USER:-muckisafe}:${DB_PASSWORD}@db:3306/${DB_NAME:-muckisafe}?serverVersion=11.8
+      # No serverVersion parameter here on purpose: it would make Doctrine
+      # treat MariaDB as MySQL 11.x and break schema introspection during
+      # migrations. Auto-detection (verified) picks the correct MariaDB platform.
+      DATABASE_URL: mysql://${DB_USER:-muckisafe}:${DB_PASSWORD}@db:3306/${DB_NAME:-muckisafe}
       MUCKIWARE_ROOT: /var/www/html
       MAILER_DSN: ${MAILER_DSN:-null://null}
       # MuckiFacilityPlugin: encryption key for repository passwords.
@@ -65,7 +68,7 @@ services:
       APP_URL: ${APP_URL}
       APP_SECRET: ${APP_SECRET}
       INSTANCE_ID: ${INSTANCE_ID}
-      DATABASE_URL: mysql://${DB_USER:-muckisafe}:${DB_PASSWORD}@db:3306/${DB_NAME:-muckisafe}?serverVersion=11.8
+      DATABASE_URL: mysql://${DB_USER:-muckisafe}:${DB_PASSWORD}@db:3306/${DB_NAME:-muckisafe}
       MUCKIWARE_ROOT: /var/www/html
       MUWA_FACILITY_SECRET: ${MUWA_FACILITY_SECRET}
       MAILER_DSN: ${MAILER_DSN:-null://null}

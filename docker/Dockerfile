@@ -5,7 +5,8 @@
 #
 # Build context = muckidrive repository root (needs: composer.json/composer.lock,
 # bin/, config/, files/, public/, src/, .htaccess, custom/muckiware/).
-# Plugins and the restic PHP library are cloned from their public GitHub repos.
+# The plugins (MuckiFacilityPlugin v0.7.0, MuckiLogPlugin v2.4.0) and the restic
+# PHP library (v1.5.0) are committed in the repository under custom/.
 
 # ---------------------------------------------------------------------------
 # Stage 1: dependencies + administration build (discarded afterwards)
@@ -49,10 +50,8 @@ RUN git clone --depth 1 --branch v0.7.0 https://github.com/muckiware/MuckiFacili
 # muckidrive does not load the Shopware storefront bundle. The MuckiLogPlugin
 # storefront ErrorControllerDecorator (shipped in v2.4.0) decorates a service
 # that does not exist here and would break container compilation — the service
-# block is removed (tested against SW 6.7.15.1).
-RUN sed -i '/<service id="MuckiLogPlugin\\Storefront\\Controller\\ErrorControllerDecorator"/,/<\/service>/d' \
-        custom/plugins/MuckiLogPlugin/src/Resources/config/services.xml \
- && ! grep -q ErrorControllerDecorator custom/plugins/MuckiLogPlugin/src/Resources/config/services.xml
+# block is removed (tested against SW 6.7.15.1). The patched services.xml is
+# committed in the repository (custom/plugins/MuckiLogPlugin).
 
 RUN composer install --no-dev --optimize-autoloader --no-interaction
 
