@@ -17,9 +17,6 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -45,12 +42,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          # The image is built from the muckidrive application repository
-          context: ${{ github.server_url }}/${{ github.repository }}.git#main:docker
-          # docker/ lives at the repo root in MuckiSafe? no — the workflow
-          # checks out MuckiSafe, but the application code lives in
-          # muckiware/muckidrive. We therefore point the build context at the
-          # muckidrive repository instead:
+          # The image is built from the muckidrive application repository,
+          # not from this (MuckiSafe) checkout — no checkout step needed.
           context: https://github.com/muckiware/muckidrive.git#main
           file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
