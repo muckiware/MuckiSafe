@@ -28,6 +28,9 @@ services:
       APP_URL: ${APP_URL}
       APP_SECRET: ${APP_SECRET}
       INSTANCE_ID: ${INSTANCE_ID}
+      # Apache unsets HOME; Composer needs HOME or COMPOSER_HOME.
+      COMPOSER_HOME: /tmp/composer
+      SHOPWARE_SKIP_WEBINSTALLER: "1"
       # No serverVersion parameter on purpose: it would pin Doctrine to the
       # wrong platform version string. Auto-detection (verified with MySQL 8.4)
       # picks the correct platform and keeps schema introspection working.
@@ -70,6 +73,9 @@ services:
       APP_URL: ${APP_URL}
       APP_SECRET: ${APP_SECRET}
       INSTANCE_ID: ${INSTANCE_ID}
+      # Apache unsets HOME; Composer needs HOME or COMPOSER_HOME.
+      COMPOSER_HOME: /tmp/composer
+      SHOPWARE_SKIP_WEBINSTALLER: "1"
       DATABASE_URL: mysql://${DB_USER:-muckisafe}:${DB_PASSWORD}@db:3306/${DB_NAME:-muckisafe}
       MUCKIWARE_ROOT: /var/www/html
       MUWA_FACILITY_SECRET: ${MUWA_FACILITY_SECRET}
