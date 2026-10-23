@@ -14,7 +14,7 @@ What you get:
 - **MuckiFacilityPlugin** v0.7.0 — database backups, restic file backups, table cleanup
   (`muckiware:db:dump`, `muckiware:table:cleanup`, snapshot management)
 - **MuckiLogPlugin** v2.4.0 — rotating log files, log levels, optional email alerts
-- **MySQL 8.4** and a **scheduled-task worker** for plugin background jobs
+- **MySQL 8.4** and a **Supercronic scheduler** for Shopware background jobs
 - First-boot installation: system + plugins + admin user are created automatically from
   environment variables — no SQL dump, no manual `system:install`
 
@@ -43,7 +43,10 @@ Then open **http://localhost:8080/admin** and log in with `ADMIN_USERNAME` /
 | `DB_PASSWORD`, `DB_ROOT_PASSWORD` | ✅ | MySQL credentials |
 | `MUWA_FACILITY_SECRET` | ✅ | Encryption key for backup repository passwords — **without it, encrypted repository passwords cannot be restored, ever** |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | ✅ | Admin login, created on first boot |
-| `ADMIN_EMAIL`, `PROJECT_NAME`, `PROJECT_EMAIL`, `PROJECT_LOCALE`, `PROJECT_CURRENCY` | – | Basic data for the initial installation |
+| `ADMIN_EMAIL`, `PROJECT_NAME`, `PROJECT_EMAIL`, `PROJECT_LOCALE` | – | Basic data for the initial installation |
+| `MESSENGER_CRON` | – | Cron expression for `messenger:consume` (default `*/5 * * * *`) |
+| `SCHEDULED_TASK_CRON` | – | Cron expression for `scheduled-task:run` (default `*/5 * * * *`) |
+| `SCHEDULER_TIMEZONE` | – | Timezone used by Supercronic (default `Europe/Berlin`) |
 | `MAILER_DSN` | – | SMTP for MuckiLogPlugin email alerts (default `null://null`) |
 | `HTTP_PORT` | – | Host port for the admin UI (default `8080`) |
 
@@ -52,8 +55,33 @@ Then open **http://localhost:8080/admin** and log in with `ADMIN_USERNAME` /
 | Service | Purpose |
 |---|---|
 | `app` | Apache + PHP-FPM, serves the administration under `/admin` |
-| `worker` | Runs `scheduled-task:run` every ~5 min: log mail dispatch, backup runs |
+| `scheduler` | Supercronic: runs `messenger:consume` and `scheduled-task:run` on configurable schedules |
 | `db` | MySQL 8.4 with Shopware-compatible settings |
+
+### Scheduler
+
+By default, both standard Shopware commands run every five minutes:
+
+```text
+bin/console messenger:consume low_priority failed async --time-limit=60 --memory-limit=512M
+bin/console scheduled-task:run --time-limit=120 --memory-limit=512M
+```
+
+Change the five-field cron expressions in `.env`, then recreate the scheduler:
+
+```dotenv
+MESSENGER_CRON=*/5 * * * *
+SCHEDULED_TASK_CRON=*/5 * * * *
+SCHEDULER_TIMEZONE=Europe/Berlin
+```
+
+```bash
+docker compose up -d --force-recreate scheduler
+docker compose logs -f scheduler
+```
+
+`flock` prevents a second copy of the same command from starting while the
+previous invocation is still running.
 
 ## Upgrades
 

@@ -103,9 +103,24 @@ RUN bash bin/build-administration.sh
 # ---------------------------------------------------------------------------
 FROM php:8.4-apache-bookworm
 
+ARG TARGETARCH
+ARG SUPERCRONIC_VERSION=v0.2.51
+ARG SUPERCRONIC_SHA256_AMD64=cc232108374e8e2b537045f2d5eaa1229f619db314c3ba6a14d38b35dc0aa123
+ARG SUPERCRONIC_SHA256_ARM64=4ae22576a78223d8ccdf5f3b3660a5cbb5288416bf0ca96afc4a36d195932b94
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates restic netcat-openbsd \
+        curl ca-certificates restic netcat-openbsd util-linux tzdata \
         libzip-dev libicu-dev libpng-dev libjpeg-dev libfreetype6-dev libsodium-dev \
+    && case "${TARGETARCH}" in \
+        amd64) SUPERCRONIC_SHA256="${SUPERCRONIC_SHA256_AMD64}" ;; \
+        arm64) SUPERCRONIC_SHA256="${SUPERCRONIC_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL \
+        "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${TARGETARCH}" \
+        -o /usr/local/bin/supercronic \
+    && echo "${SUPERCRONIC_SHA256}  /usr/local/bin/supercronic" | sha256sum -c - \
+    && chmod +x /usr/local/bin/supercronic \
     && rm -rf /var/lib/apt/lists/* \
     && a2enmod rewrite headers
 
@@ -117,8 +132,9 @@ WORKDIR /var/www/html
 
 COPY --from=build /var/www/html /var/www/html
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/scheduler-entrypoint.sh /usr/local/bin/scheduler-entrypoint.sh
 
-RUN chmod +x /usr/local/bin/entrypoint.sh \
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/scheduler-entrypoint.sh \
     && sed -i 's|/var/www/html|/var/www/html/public|' /etc/apache2/sites-available/000-default.conf \
     && printf '<Directory /var/www/html/public>\n    AllowOverride All\n    Require all granted\n</Directory>\n' \
        > /etc/apache2/conf-available/docroot.conf \

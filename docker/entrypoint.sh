@@ -40,7 +40,6 @@ if ! bin/console system:is-installed >/dev/null 2>&1; then
         --shop-name "${PROJECT_NAME:-MuckiSafe}" \
         --shop-email "${PROJECT_EMAIL:-admin@example.com}" \
         --shop-locale "${PROJECT_LOCALE:-en-GB}" \
-        --shop-currency "${PROJECT_CURRENCY:-EUR}" \
         --skip-assets-install \
         --skip-first-run-wizard \
         --no-assign-theme
