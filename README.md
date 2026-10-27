@@ -119,9 +119,13 @@ The GitHub workflow in this repository checks out MuckiSafe, clones the
 [muckidrive](https://github.com/muckiware/muckidrive) platform into `./muckidrive`
 and builds `ghcr.io/muckiware/muckisafe` (multi-arch `linux/amd64` +
 `linux/arm64`) on every push to `main`, on version tags `v*` and weekly
-(to pick up platform updates). Tag builds are additionally published as
-`ghcr.io/muckiware/muckisafe:vX.Y.Z`. A manual build with a specific platform
-version is possible via *Run workflow* (`muckidrive_ref` input).
+(to pick up platform updates). Builds from `main` are published as `edge`, a
+monotonically increasing `build-N` tag and a commit-specific `sha-...` tag.
+SemVer tag builds such as `v0.0.2` additionally publish `v0.0.2`, the moving
+patch-series tag `v0.0`, and `latest`; therefore `latest` always denotes the
+most recent stable release. A manual build with a specific platform version is
+possible via *Run workflow* (`muckidrive_ref` input) and receives `build-N` and
+`sha-...` tags as well.
 
 ## Reverse proxy / HTTPS
 
