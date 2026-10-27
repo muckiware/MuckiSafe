@@ -1,0 +1,23 @@
+Port 22
+
+HostKey /var/lib/muckisafe-ssh/ssh_host_rsa_key
+HostKey /var/lib/muckisafe-ssh/ssh_host_ed25519_key
+
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+AuthenticationMethods publickey
+PasswordAuthentication no
+PermitEmptyPasswords no
+KbdInteractiveAuthentication no
+UsePAM no
+AllowUsers root
+
+X11Forwarding no
+AllowAgentForwarding no
+AllowTcpForwarding no
+PermitTunnel no
+GatewayPorts no
+PermitUserEnvironment no
+
+Subsystem sftp internal-sftp

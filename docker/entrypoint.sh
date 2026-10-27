@@ -9,6 +9,25 @@ WAIT_TIMEOUT="${DB_WAIT_TIMEOUT:-60}"
 
 log() { echo "[entrypoint] $*"; }
 
+# --------------------------------------------------------------- start SSH
+# SSH is opt-in: without at least one public key, no SSH daemon is started.
+# Password and interactive authentication are disabled in sshd_config.
+if [ -n "${SSH_PUBLIC_KEYS:-}" ]; then
+    /usr/local/bin/configure-ssh-keys.sh
+    mkdir -p /run/sshd /var/lib/muckisafe-ssh
+    if [ ! -f /var/lib/muckisafe-ssh/ssh_host_ed25519_key ]; then
+        ssh-keygen -q -t ed25519 -N '' -f /var/lib/muckisafe-ssh/ssh_host_ed25519_key
+    fi
+    if [ ! -f /var/lib/muckisafe-ssh/ssh_host_rsa_key ]; then
+        ssh-keygen -q -t rsa -b 3072 -N '' -f /var/lib/muckisafe-ssh/ssh_host_rsa_key
+    fi
+    /usr/sbin/sshd -t
+    /usr/sbin/sshd
+    log "SSH server started (root login with public key only)."
+else
+    log "SSH disabled: SSH_PUBLIC_KEYS is empty."
+fi
+
 # ---------------------------------------------------------------- wait for DB
 if [ -n "$DATABASE_URL" ]; then
     log "Waiting up to ${WAIT_TIMEOUT}s for database ..."

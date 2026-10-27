@@ -108,9 +108,16 @@ ARG SUPERCRONIC_VERSION=v0.2.51
 ARG SUPERCRONIC_SHA256_AMD64=cc232108374e8e2b537045f2d5eaa1229f619db314c3ba6a14d38b35dc0aa123
 ARG SUPERCRONIC_SHA256_ARM64=4ae22576a78223d8ccdf5f3b3660a5cbb5288416bf0ca96afc4a36d195932b94
 
+# Debian locks root by default. Give it a discarded random password hash so
+# OpenSSH permits public-key login; sshd_config still disables all password
+# and interactive authentication.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates restic netcat-openbsd util-linux tzdata \
+        curl ca-certificates openssl passwd restic netcat-openbsd util-linux tzdata openssh-server \
         libzip-dev libicu-dev libpng-dev libjpeg-dev libfreetype6-dev libsodium-dev \
+    && ROOT_SSH_PASSWORD="$(openssl rand -base64 48)" \
+    && ROOT_SSH_HASH="$(printf '%s' "$ROOT_SSH_PASSWORD" | openssl passwd -6 -stdin)" \
+    && usermod --password "$ROOT_SSH_HASH" root \
+    && unset ROOT_SSH_PASSWORD ROOT_SSH_HASH \
     && case "${TARGETARCH}" in \
         amd64) SUPERCRONIC_SHA256="${SUPERCRONIC_SHA256_AMD64}" ;; \
         arm64) SUPERCRONIC_SHA256="${SUPERCRONIC_SHA256_ARM64}" ;; \
@@ -122,6 +129,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && echo "${SUPERCRONIC_SHA256}  /usr/local/bin/supercronic" | sha256sum -c - \
     && chmod +x /usr/local/bin/supercronic \
     && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/ssh/ssh_host_* \
     && a2enmod rewrite headers
 
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
@@ -133,8 +141,10 @@ WORKDIR /var/www/html
 COPY --from=build /var/www/html /var/www/html
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/scheduler-entrypoint.sh /usr/local/bin/scheduler-entrypoint.sh
+COPY docker/configure-ssh-keys.sh /usr/local/bin/configure-ssh-keys.sh
+COPY docker/sshd_config /etc/ssh/sshd_config
 
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/scheduler-entrypoint.sh \
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/scheduler-entrypoint.sh /usr/local/bin/configure-ssh-keys.sh \
     && sed -i 's|/var/www/html|/var/www/html/public|' /etc/apache2/sites-available/000-default.conf \
     && printf '<Directory /var/www/html/public>\n    AllowOverride All\n    Require all granted\n</Directory>\n' \
        > /etc/apache2/conf-available/docroot.conf \
@@ -142,7 +152,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/scheduler-entrypoint.sh
     && mkdir -p /var/www/html/var \
     && chown -R www-data:www-data /var/www/html
 
-EXPOSE 80
+EXPOSE 80 22
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["apache2-foreground"]

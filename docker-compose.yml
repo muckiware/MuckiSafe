@@ -25,6 +25,9 @@ services:
       APP_URL: ${APP_URL}
       APP_SECRET: ${APP_SECRET}
       INSTANCE_ID: ${INSTANCE_ID}
+      # SSH is disabled when this is empty. Put multiple keys on separate lines;
+      # configure-ssh-keys.sh also accepts a literal backslash-n separator.
+      SSH_PUBLIC_KEYS: ${SSH_PUBLIC_KEYS:-}
       # Apache unsets HOME; Composer needs HOME or COMPOSER_HOME.
       COMPOSER_HOME: /tmp/composer
       SHOPWARE_SKIP_WEBINSTALLER: "1"
@@ -47,6 +50,8 @@ services:
       PROJECT_LOCALE: ${PROJECT_LOCALE:-en-GB}
     volumes:
       - app-var:/var/www/html/var
+      # Persist server host keys so SSH identity survives container recreation.
+      - ssh-host-keys:/var/lib/muckisafe-ssh
     depends_on:
       db:
         condition: service_healthy
@@ -116,4 +121,5 @@ services:
 
 volumes:
   app-var:
+  ssh-host-keys:
   db-data:

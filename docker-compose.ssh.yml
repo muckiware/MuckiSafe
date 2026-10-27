@@ -1,0 +1,7 @@
+# Optional Compose override for SSH access.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.ssh.yml up -d
+services:
+  app:
+    ports:
+      - "${SSH_PORT:-2222}:22"

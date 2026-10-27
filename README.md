@@ -15,6 +15,7 @@ What you get:
   (`muckiware:db:dump`, `muckiware:table:cleanup`, snapshot management)
 - **MuckiLogPlugin** v2.4.0 — rotating log files, log levels, optional email alerts
 - **MySQL 8.4** and a **Supercronic scheduler** for Shopware background jobs
+- Optional **SSH access** as `root`, secured exclusively with one or more public keys
 - First-boot installation: system + plugins + admin user are created automatically from
   environment variables — no SQL dump, no manual `system:install`
 
@@ -49,12 +50,50 @@ Then open **http://localhost:8080/admin** and log in with `ADMIN_USERNAME` /
 | `SCHEDULER_TIMEZONE` | – | Timezone used by Supercronic (default `Europe/Berlin`) |
 | `MAILER_DSN` | – | SMTP for MuckiLogPlugin email alerts (default `null://null`) |
 | `HTTP_PORT` | – | Host port for the admin UI (default `8080`) |
+| `SSH_PUBLIC_KEYS` | – | One or more SSH public keys; empty disables SSH |
+| `SSH_PORT` | – | Host port for SSH (default `2222`) |
+
+## SSH access
+
+SSH is opt-in and starts only when `SSH_PUBLIC_KEYS` is set. The base Compose
+file does not publish port 22; `docker-compose.ssh.yml` adds the port only for
+SSH-enabled deployments. Login is always `root`; password, keyboard-interactive
+and empty-password authentication are disabled. Only public-key authentication
+is accepted.
+
+For one key, first download the optional Compose override and configure `.env`:
+
+```bash
+curl -O https://raw.githubusercontent.com/muckiware/MuckiSafe/main/docker-compose.ssh.yml
+```
+
+```dotenv
+SSH_PORT=2222
+SSH_PUBLIC_KEYS=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... workstation
+```
+
+For multiple keys, put `\n` between complete public-key lines:
+
+```dotenv
+SSH_PUBLIC_KEYS="ssh-ed25519 AAAA... workstation\nssh-ed25519 AAAA... laptop"
+```
+
+Then recreate the app container and connect:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ssh.yml up -d --force-recreate app
+ssh -p 2222 root@localhost
+```
+
+Malformed keys stop the app container instead of silently enabling an unusable
+SSH configuration. The server host keys live in the `ssh-host-keys` volume, so
+the SSH fingerprint remains stable when the app container is recreated.
 
 ## Services
 
 | Service | Purpose |
 |---|---|
-| `app` | Apache + PHP-FPM, serves the administration under `/admin` |
+| `app` | Apache + PHP, serves `/admin`; optional key-only SSH on container port 22 |
 | `scheduler` | Supercronic: runs `messenger:consume` and `scheduled-task:run` on configurable schedules |
 | `db` | MySQL 8.4 with Shopware-compatible settings |
 
@@ -141,7 +180,8 @@ muckisafe.example.com {
 ## Repository layout
 
 ```
-docker-compose.yml      End-user compose file (app + worker + db)
+docker-compose.yml      End-user compose file (app + scheduler + db)
+docker-compose.ssh.yml  Optional SSH host-port override
 .env.example            All configurable variables with explanations
 docker/Dockerfile       Image build: muckidrive platform + Muckiware plugins
 docker/entrypoint.sh    First-boot installation + Apache start
