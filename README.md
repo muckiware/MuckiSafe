@@ -50,7 +50,7 @@ Then open **http://localhost:8080/admin** and log in with `ADMIN_USERNAME` /
 | `SCHEDULER_TIMEZONE` | – | Timezone used by Supercronic (default `Europe/Berlin`) |
 | `MAILER_DSN` | – | SMTP for MuckiLogPlugin email alerts (default `null://null`) |
 | `HTTP_PORT` | – | Host port for the admin UI (default `8080`) |
-| `SSH_PUBLIC_KEYS` | – | One or more SSH public keys; empty disables SSH |
+| `SSH_PUBLIC_KEYS` | – | SSH public key **content** — one bare key per line, no file paths; empty disables SSH (see [SSH access](#ssh-access)) |
 | `SSH_PORT` | – | Host port for SSH (default `2222`) |
 
 ## SSH access
@@ -60,6 +60,30 @@ file does not publish port 22; `docker-compose.ssh.yml` adds the port only for
 SSH-enabled deployments. Login is always `root`; password, keyboard-interactive
 and empty-password authentication are disabled. Only public-key authentication
 is accepted.
+
+### What goes into `SSH_PUBLIC_KEYS`
+
+The variable contains the **public key content itself — not a path to a key
+file**. Each entry is one bare public-key line, exactly as printed by
+`cat ~/.ssh/id_ed25519.pub` (key type, base64 key, optional comment):
+
+```text
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... user@workstation
+```
+
+- **One key per line** — multiple keys are separated by real newlines or a
+  literal `\n` in a double-quoted `.env` value.
+- **Allowed key types:** `ssh-ed25519`, `ssh-rsa`, `ecdsa-sha2-nistp256`,
+  `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521` and the FIDO/hardware key types
+  `sk-ssh-ed25519@openssh.com` and `sk-ecdsa-sha2-nistp256@openssh.com`.
+- **Bare keys only:** `authorized_keys` options (`command="..."`, `no-pty`, …)
+  are rejected — they could silently alter the intended access policy.
+- **Validated at container start:** every line must pass `ssh-keygen -l -f`
+  before it is written to `/root/.ssh/authorized_keys`. Passing a file path
+  does not work — the path string is parsed as a key, fails validation, and
+  stops the app container. Invalid input never results in a silently broken
+  or unintended SSH configuration.
+- **Empty value** (the default): SSH stays disabled.
 
 For one key, first download the optional Compose override and configure `.env`:
 
@@ -85,9 +109,8 @@ docker compose -f docker-compose.yml -f docker-compose.ssh.yml up -d --force-rec
 ssh -p 2222 root@localhost
 ```
 
-Malformed keys stop the app container instead of silently enabling an unusable
-SSH configuration. The server host keys live in the `ssh-host-keys` volume, so
-the SSH fingerprint remains stable when the app container is recreated.
+The server host keys live in the `ssh-host-keys` volume, so the SSH fingerprint
+remains stable when the app container is recreated.
 
 ## Services
 
