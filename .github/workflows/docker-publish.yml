@@ -10,6 +10,8 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  repository_dispatch:
+    types: [muckidrive-release]
   schedule:
     - cron: '0 3 * * 1'   # weekly: pick up muckidrive/platform updates
   workflow_dispatch:
@@ -24,7 +26,8 @@ env:
   IMAGE_NAME: muckiware/muckisafe
   # Passed via env (not interpolated into the shell command) to avoid
   # command injection through the workflow_dispatch input.
-  MUCKIDRIVE_REF: ${{ github.event.inputs.muckidrive_ref || 'main' }}
+  # Priority: muckidrive release event payload > manual dispatch input > main.
+  MUCKIDRIVE_REF: ${{ github.event.client_payload.muckidrive_ref || github.event.inputs.muckidrive_ref || 'main' }}
 
 jobs:
   build:

@@ -224,6 +224,14 @@ most recent stable release. A manual build with a specific platform version is
 possible via *Run workflow* (`muckidrive_ref` input) and receives `build-N` and
 `sha-...` tags as well.
 
+A muckidrive platform release (`v*` tag) triggers this workflow automatically
+via a `repository_dispatch` event (`muckidrive-release`) with `muckidrive_ref`
+pinned to that platform tag, so every release build is traceable to a tagged
+platform version. This requires the `MUCKISAFE_DISPATCH_TOKEN` secret (a
+fine-grained PAT with *actions: write* on this repository) on the
+[muckidrive](https://github.com/muckiware/muckidrive) repository; until it is
+configured, the muckidrive release workflow skips the trigger with a warning.
+
 ## Reverse proxy / HTTPS
 
 The compose file publishes plain HTTP on `HTTP_PORT`. Put your own reverse proxy
