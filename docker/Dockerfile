@@ -99,11 +99,12 @@ ENV APP_ENV=prod \
 RUN bash bin/build-administration.sh
 
 # ---------------------------------------------------------------------------
-# Stage 2: runtime (Apache + PHP, no Node.js, no build toolchain)
+# Stage 2: runtime (Apache + PHP; Node.js 22 + Composer for console tasks)
 # ---------------------------------------------------------------------------
 FROM php:8.4-apache-bookworm
 
 ARG TARGETARCH
+ARG COMPOSER_VERSION=2.7.7
 ARG SUPERCRONIC_VERSION=v0.2.51
 ARG SUPERCRONIC_SHA256_AMD64=cc232108374e8e2b537045f2d5eaa1229f619db314c3ba6a14d38b35dc0aa123
 ARG SUPERCRONIC_SHA256_ARM64=4ae22576a78223d8ccdf5f3b3660a5cbb5288416bf0ca96afc4a36d195932b94
@@ -113,6 +114,7 @@ ARG SUPERCRONIC_SHA256_ARM64=4ae22576a78223d8ccdf5f3b3660a5cbb5288416bf0ca96afc4
 # and interactive authentication.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates openssl passwd restic netcat-openbsd util-linux tzdata openssh-server \
+        git unzip \
         libzip-dev libicu-dev libpng-dev libjpeg-dev libfreetype6-dev libsodium-dev \
     && ROOT_SSH_PASSWORD="$(openssl rand -base64 48)" \
     && ROOT_SSH_HASH="$(printf '%s' "$ROOT_SSH_PASSWORD" | openssl passwd -6 -stdin)" \
@@ -135,6 +137,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j"$(nproc)" \
         pdo_mysql mysqli intl gd zip sodium opcache bcmath
+
+# Node.js 22 and pinned Composer for console/build/debug tasks inside the
+# container (SSH sessions, docker compose exec). The running app itself does
+# not depend on them. The Composer SHA-384 was cross-verified against both
+# getcomposer.org and the composer/composer GitHub release asset.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL "https://getcomposer.org/download/${COMPOSER_VERSION}/composer.phar" \
+        -o /usr/local/bin/composer \
+    && echo "a63342c65fa12bab2c079f4ea64d621aaeabbbb42942aeb113a78044c2325781bf887f64fd479e0c38dd4f7a720067d4  /usr/local/bin/composer" | sha384sum -c - \
+    && chmod +x /usr/local/bin/composer \
+    && node --version \
+    && npm --version \
+    && COMPOSER_HOME=/tmp/composer composer --version
 
 WORKDIR /var/www/html
 

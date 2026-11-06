@@ -10,10 +10,11 @@ ghcr.io/muckiware/muckisafe:latest
 
 What you get:
 
-- **Administration UI** (Vue 3) of muckidrive, pre-built — no Node.js needed at runtime
-- **MuckiFacilityPlugin** v0.7.0 — database backups, restic file backups, table cleanup
+- **Administration UI** (Vue 3) of muckidrive, pre-built at image build time
+- **MuckiFacilityPlugin** v0.8.0 — database backups, restic file backups, table cleanup
   (`muckiware:db:dump`, `muckiware:table:cleanup`, snapshot management)
 - **MuckiLogPlugin** v2.4.0 — rotating log files, log levels, optional email alerts
+- **Node.js 22** and **Composer 2.7.7** inside the container for console and build tasks
 - **MySQL 8.4** and a **Supercronic scheduler** for Shopware background jobs
 - Optional **SSH access** as `root`, secured exclusively with one or more public keys
 - First-boot installation: system + plugins + admin user are created automatically from
@@ -112,6 +113,40 @@ ssh -p 2222 root@localhost
 The server host keys live in the `ssh-host-keys` volume, so the SSH fingerprint
 remains stable when the app container is recreated.
 
+### Running `bin/console` over SSH
+
+An SSH session does **not** inherit the container environment — `sshd` builds
+the login environment from scratch, so `DATABASE_URL`, `APP_ENV` and
+`MUCKIWARE_ROOT` are missing and every `bin/console` command fails with
+`Doctrine\DBAL\Exception\ConnectionException (2002) Connection refused`
+even though the admin UI works fine.
+
+Console commands belong in one of two places:
+
+1. From the host — `docker compose exec` injects the full container
+   environment:
+
+   ```bash
+   docker compose exec app bin/console plugin:refresh
+   ```
+
+2. Inside the SSH session — load the runtime environment from PID 1 first:
+
+   ```bash
+   for VAR in DATABASE_URL APP_ENV APP_URL APP_SECRET INSTANCE_ID MUCKIWARE_ROOT COMPOSER_HOME MAILER_DSN; do
+       VAL="$(tr "\0" "\n" < /proc/1/environ | grep "^${VAR}=" | cut -d= -f2-)"
+       [ -n "$VAL" ] && export "$VAR=$VAL"
+   done
+   bin/console plugin:refresh
+   ```
+
+After any console command run as `root` (SSH session or `docker compose exec`),
+restore file ownership so the web server keeps working:
+
+```bash
+docker compose exec app chown -R www-data:www-data var public
+```
+
 ## Services
 
 | Service | Purpose |
@@ -169,7 +204,7 @@ docker build -f docker/Dockerfile -t muckisafe:local .
 The build context is the MuckiSafe repository with the muckidrive platform cloned
 into `./muckidrive` (the CI workflow does exactly this). The Dockerfile copies
 the platform skeleton from `muckidrive/`, then adds the Muckiware plugins at
-build time — cloned from their public GitHub tags (MuckiFacilityPlugin v0.7.0,
+build time — cloned from their public GitHub tags (MuckiFacilityPlugin v0.8.0,
 MuckiLogPlugin v2.4.0, restic PHP client v1.5.0). One muckidrive-specific patch
 is applied during the build: the MuckiLogPlugin storefront
 `ErrorControllerDecorator` service definition is removed, because muckidrive
