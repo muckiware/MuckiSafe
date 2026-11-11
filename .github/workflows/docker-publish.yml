@@ -10,8 +10,11 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  # muckidrive-release: platform release, payload {muckidrive_ref}
+  # muckidrive-core-release / muckidrive-master-release: package release,
+  # payload {package, ref} - built from the latest muckidrive release tag
   repository_dispatch:
-    types: [muckidrive-release]
+    types: [muckidrive-release, muckidrive-core-release, muckidrive-master-release]
   schedule:
     - cron: '0 3 * * 1'   # weekly: pick up muckidrive/platform updates
   workflow_dispatch:
@@ -27,7 +30,15 @@ env:
   # Passed via env (not interpolated into the shell command) to avoid
   # command injection through the workflow_dispatch input.
   # Priority: muckidrive release event payload > manual dispatch input > main.
+  # core/master release events override it with the latest muckidrive tag
+  # (step "Resolve muckidrive ref").
   MUCKIDRIVE_REF: ${{ github.event.client_payload.muckidrive_ref || github.event.inputs.muckidrive_ref || 'main' }}
+
+# core and master are often released together: queue the second build instead
+# of running two image builds in parallel.
+concurrency:
+  group: muckisafe-image-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -38,6 +49,23 @@ jobs:
     steps:
       - name: Checkout MuckiSafe (build recipe)
         uses: actions/checkout@v4
+
+      # The payload ref of a package release is a muckiware/core or
+      # muckiware/master tag, not a muckidrive ref. Build from the latest
+      # muckidrive release instead; composer resolves the new package version.
+      - name: Resolve muckidrive ref (package release)
+        if: github.event_name == 'repository_dispatch' && github.event.action != 'muckidrive-release'
+        env:
+          TRIGGER_PACKAGE: ${{ github.event.client_payload.package }}
+          TRIGGER_REF: ${{ github.event.client_payload.ref }}
+        run: |
+          LATEST=$(git ls-remote --tags --refs --sort=-v:refname https://github.com/muckiware/muckidrive.git 'v*' | head -n 1 | sed 's#.*refs/tags/##')
+          if [ -z "$LATEST" ]; then
+            echo "::error::No muckidrive release tag (v*) found."
+            exit 1
+          fi
+          echo "Triggered by ${TRIGGER_PACKAGE} ${TRIGGER_REF} - building from muckidrive ${LATEST}."
+          echo "MUCKIDRIVE_REF=${LATEST}" >> "$GITHUB_ENV"
 
       - name: Clone muckidrive platform (application source)
         run: git clone --depth 1 --branch "$MUCKIDRIVE_REF" https://github.com/muckiware/muckidrive.git muckidrive
@@ -73,6 +101,11 @@ jobs:
             type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=build-${{ github.run_number }}
             type=sha,prefix=sha-
+          # Trace which muckidrive ref and which release event built the image.
+          labels: |
+            io.muckiware.muckidrive.ref=${{ env.MUCKIDRIVE_REF }}
+            io.muckiware.trigger=${{ github.event.action || github.event_name }}
+            io.muckiware.trigger.ref=${{ github.event.client_payload.ref || github.event.client_payload.muckidrive_ref || github.ref_name }}
 
       - name: Build and push
         uses: docker/build-push-action@v6

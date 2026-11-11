@@ -227,10 +227,22 @@ possible via *Run workflow* (`muckidrive_ref` input) and receives `build-N` and
 A muckidrive platform release (`v*` tag) triggers this workflow automatically
 via a `repository_dispatch` event (`muckidrive-release`) with `muckidrive_ref`
 pinned to that platform tag, so every release build is traceable to a tagged
-platform version. This requires the `MUCKISAFE_DISPATCH_TOKEN` secret (a
-fine-grained PAT with *contents: write* on this repository) on the
-[muckidrive](https://github.com/muckiware/muckidrive) repository; until it is
-configured, the muckidrive release workflow skips the trigger with a warning.
+platform version.
+
+Releases of the platform packages trigger it as well:
+[muckiware/core](https://github.com/muckiware/core) sends
+`muckidrive-core-release` and [muckiware/master](https://github.com/muckiware/master)
+sends `muckidrive-master-release` (payload `package` + `ref`). These builds use
+the latest muckidrive release tag as platform source; composer resolves the new
+package version at build time (muckidrive does not commit a `composer.lock`).
+Builds are queued, so a joint core + master release does not run two builds in
+parallel. Every image carries the labels `io.muckiware.muckidrive.ref`,
+`io.muckiware.trigger` and `io.muckiware.trigger.ref`.
+
+All three triggers require the `MUCKISAFE_DISPATCH_TOKEN` secret (a
+fine-grained PAT with *contents: write* on this repository) on the triggering
+repository (muckidrive, core, master); until it is configured, the release
+workflow there skips the trigger with a warning.
 
 ## Reverse proxy / HTTPS
 
