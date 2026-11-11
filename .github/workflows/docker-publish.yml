@@ -113,8 +113,13 @@ jobs:
           context: .
           file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
+          # CACHE_BUST: muckidrive has no composer.lock, so the composer
+          # layer must be re-resolved on every run. Otherwise it is restored
+          # from the GHA cache and a core/master/plugin release never reaches
+          # the image. Layers before it (apt, PHP extensions, Node) stay cached.
           build-args: |
             MUCKIDRIVE_REF=${{ env.MUCKIDRIVE_REF }}
+            CACHE_BUST=${{ github.run_id }}-${{ github.run_attempt }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

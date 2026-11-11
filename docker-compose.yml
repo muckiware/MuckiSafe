@@ -8,8 +8,8 @@
 #   -> http://localhost:8080/admin
 #
 # Build the image yourself instead of pulling:
-#   git clone https://github.com/muckiware/muckidrive.git
-#   cd muckidrive
+#   git clone https://github.com/muckiware/MuckiSafe.git && cd MuckiSafe
+#   git clone https://github.com/muckiware/muckidrive.git muckidrive
 #   docker build -f docker/Dockerfile -t muckisafe:local .
 
 name: muckisafe
@@ -50,6 +50,12 @@ services:
       PROJECT_LOCALE: ${PROJECT_LOCALE:-en-GB}
     volumes:
       - app-var:/var/www/html/var
+      # Private filesystem (uploads of the facility plugin) and media. Without
+      # these volumes the data is gone whenever the container is recreated,
+      # i.e. on every image update. public/bundles is NOT a volume on purpose:
+      # it must always come from the image.
+      - app-files:/var/www/html/files
+      - app-media:/var/www/html/public/media
       # Persist server host keys so SSH identity survives container recreation.
       - ssh-host-keys:/var/lib/muckisafe-ssh
     depends_on:
@@ -88,6 +94,8 @@ services:
       SCHEDULER_TIMEZONE: ${SCHEDULER_TIMEZONE:-Europe/Berlin}
     volumes:
       - app-var:/var/www/html/var
+      - app-files:/var/www/html/files
+      - app-media:/var/www/html/public/media
     depends_on:
       app:
         condition: service_healthy
@@ -121,5 +129,7 @@ services:
 
 volumes:
   app-var:
+  app-files:
+  app-media:
   ssh-host-keys:
   db-data:

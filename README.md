@@ -190,11 +190,42 @@ docker compose pull
 docker compose up -d
 ```
 
-On boot the entrypoint runs `system:is-installed`; existing installations are not
-reinstalled. On every boot it then runs `vendor/bin/shopware-deployment-helper run`:
-migrations when the Shopware core version changed, installation of plugins added in
-a newer image, updates of outdated plugins, activation of inactive plugins and
-`scheduled-task:register`. Plugin updates arrive via new image versions.
+What happens on boot (`docker/entrypoint.sh`):
+
+1. **New image?** The image carries a fingerprint of its resolved `composer.lock`
+   (`.image-fingerprint`); the fingerprint applied last is stored in the `var`
+   volume. If they differ, the cache of the previous image is dropped.
+2. **Fresh database?** Decided by looking at the database itself
+   (`docker/db-probe.php`): only a database without tables is installed with
+   `system:install`. A console command failing for any other reason never
+   triggers a reinstall over existing data.
+3. **Admin user** is created whenever no user exists yet.
+4. **Migrations** — for every new image `system:update:finish` runs, so
+   migrations of `muckiware/core` and `muckiware/master` are applied even when
+   the Shopware core version did not change.
+5. **Plugins** — `vendor/bin/shopware-deployment-helper run` installs plugins
+   added in a newer image, updates outdated ones, activates inactive ones and
+   runs `scheduled-task:register`.
+
+The scheduler only runs its jobs while its own image fingerprint matches the
+applied one, so a scheduler of the previous image idles during an update.
+
+Plugin and platform updates arrive via new image versions; the plugin versions
+are build args in `docker/Dockerfile`.
+
+### Persistent data
+
+| Volume | Path | Content |
+|---|---|---|
+| `app-var` | `var/` | logs, cache, database dumps (`var/db/backup`) |
+| `app-files` | `files/` | private filesystem, uploads of the facility plugin |
+| `app-media` | `public/media/` | media files |
+| `db-data` | MySQL | database |
+| `ssh-host-keys` | `/var/lib/muckisafe-ssh` | SSH host keys |
+
+Everything else inside the container comes from the image and is replaced on
+every update. `app-files` and `app-media` were added later: when updating an
+older deployment, download the current `docker-compose.yml` first.
 
 ## Building the image yourself
 
@@ -213,10 +244,13 @@ MuckiFacilityMenuPlugin v1.0.0, MuckiLogPlugin v2.4.0; versions are build args)
 plus the restic PHP client v1.5.0 cloned from its GitHub tag. The plugins are
 installed, activated and updated on every container start by
 [shopware/deployment-helper](https://github.com/shopware/deployment-helper)
-(`vendor/bin/shopware-deployment-helper run`, called from `docker/entrypoint.sh`). One muckidrive-specific patch
-is applied during the build: the MuckiLogPlugin storefront
-`ErrorControllerDecorator` service definition is removed, because muckidrive
-does not load the Shopware storefront bundle. See `docker/Dockerfile` for details.
+(`vendor/bin/shopware-deployment-helper run`, called from `docker/entrypoint.sh`).
+The administration is built with `CI=1`, so `bin/ci` loads all composer-installed
+plugins and their administration modules and assets become part of the image.
+One muckidrive-specific patch is applied during the build for MuckiLogPlugin up
+to v2.4.0: the storefront `ErrorControllerDecorator` service definition is
+removed, because muckidrive does not load the Shopware storefront bundle (from
+v2.5.0 on the plugin ships it disabled). See `docker/Dockerfile` for details.
 
 ## How the image is built & published
 
@@ -270,7 +304,8 @@ docker-compose.yml      End-user compose file (app + scheduler + db)
 docker-compose.ssh.yml  Optional SSH host-port override
 .env.example            All configurable variables with explanations
 docker/Dockerfile       Image build: muckidrive platform + Muckiware plugins
-docker/entrypoint.sh    First-boot installation + Apache start
+docker/entrypoint.sh    First-boot installation, image updates, plugins + Apache start
+docker/db-probe.php     Database inspection for the entrypoint (no kernel boot)
 .dockerignore           Build context filter
 .github/workflows/      Image build & publish to GHCR
 ```

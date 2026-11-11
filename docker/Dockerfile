@@ -74,31 +74,55 @@ RUN rm -rf custom/muckiware/restic \
  && git clone --depth 1 --branch ${RESTIC_LIB_REF} https://github.com/muckiware/restic.git custom/muckiware/restic \
  && rm -rf custom/muckiware/restic/.git
 
+# muckidrive does not commit a composer.lock, so the composer step below must
+# re-resolve on every build. Docker cannot see that Packagist changed: without
+# a changing input the layer is served from the build cache and new
+# muckiware/core, muckiware/master or plugin releases never reach the image.
+# The CI workflow passes a unique value per run.
+ARG CACHE_BUST=local
+
 # Plugins + shopware/deployment-helper from Packagist. custom/apps, custom/plugins and custom/static-plugins
 # are referenced by composer.json path repositories — create them so composer
 # does not fail on missing dirs.
-RUN mkdir -p custom/apps custom/plugins custom/static-plugins \
- && composer require muckiware/facility-plugin:"${FACILITY_PLUGIN_VERSION}" --no-interaction --no-scripts \
- && composer require muckiware/facility-menu-plugin:"${FACILITY_MENU_PLUGIN_VERSION}" --no-interaction --no-scripts \
- && composer require muckiware/log-plugin:"${LOG_PLUGIN_VERSION}" --no-interaction --no-scripts \
- && composer require shopware/deployment-helper:"${DEPLOYMENT_HELPER_VERSION}" --no-interaction --no-scripts \
+RUN echo "composer resolve: ${CACHE_BUST}" \
+ && mkdir -p custom/apps custom/plugins custom/static-plugins \
+ && composer require \
+        muckiware/facility-plugin:"${FACILITY_PLUGIN_VERSION}" \
+        muckiware/facility-menu-plugin:"${FACILITY_MENU_PLUGIN_VERSION}" \
+        muckiware/log-plugin:"${LOG_PLUGIN_VERSION}" \
+        shopware/deployment-helper:"${DEPLOYMENT_HELPER_VERSION}" \
+        --no-interaction --no-scripts \
  && composer dump-autoload --optimize \
  && composer install --no-dev --optimize-autoloader --no-interaction
 
 # muckidrive does not load the Shopware storefront bundle. The MuckiLogPlugin
-# storefront ErrorControllerDecorator (shipped in v2.4.0) decorates a service
-# that does not exist here and would break container compilation — the service
-# block is removed during the build (verified against SW 6.7.15.1).
+# storefront ErrorControllerDecorator decorates a service that does not exist
+# here and would break container compilation. Up to v2.4.0 the service block is
+# active and gets removed here; from v2.5.0 on the plugin ships it commented
+# out and nothing needs patching.
 RUN LOG_SERVICES=vendor/muckiware/log-plugin/src/Resources/config/services.xml \
- && sed -i '/<service id="MuckiLogPlugin\\Storefront\\Controller\\ErrorControllerDecorator"/,/<\/service>/d' "$LOG_SERVICES" \
- && ! grep -q ErrorControllerDecorator "$LOG_SERVICES" \
- && php -r 'exit(simplexml_load_file($argv[1]) === false ? 1 : 0);' "$LOG_SERVICES" \
- && echo "MuckiLogPlugin services.xml patched and valid"
+ && if grep -q '^[[:space:]]*<service id="MuckiLogPlugin\\Storefront\\Controller\\ErrorControllerDecorator"' "$LOG_SERVICES" \
+    && ! grep -q 'Disabled: Storefront is not available' "$LOG_SERVICES"; then \
+        sed -i '/<service id="MuckiLogPlugin\\Storefront\\Controller\\ErrorControllerDecorator"/,/<\/service>/d' "$LOG_SERVICES" \
+        && ! grep -q ErrorControllerDecorator "$LOG_SERVICES" \
+        && echo "MuckiLogPlugin services.xml patched"; \
+    else \
+        echo "MuckiLogPlugin services.xml needs no patch"; \
+    fi \
+ && php -r 'exit(simplexml_load_file($argv[1]) === false ? 1 : 0);' "$LOG_SERVICES"
 
 # Administration production build (no database required — verified:
 # bundle:dump, feature:dump, framework:schema and assets:install all run
-# without a DB connection)
+# without a DB connection).
+#
+# CI=1 makes bin/build-administration.sh use bin/ci instead of bin/console.
+# bin/ci boots the kernel with the ComposerPluginLoader, which treats every
+# composer-installed plugin as active. Only then do the plugins end up in
+# var/plugins.json, get their administration compiled and their assets copied
+# to public/bundles. With bin/console (no database at build time) no plugin is
+# loaded at all, and the container start skips the asset install on purpose.
 ENV APP_ENV=prod \
+    CI=1 \
     MUCKIWARE_ROOT=/var/www/html \
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     DISABLE_ADMIN_COMPILATION_TYPECHECK=true \
@@ -107,6 +131,13 @@ ENV APP_ENV=prod \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
 RUN bash bin/build-administration.sh
+
+# Fingerprint of everything composer resolved for this image. The entrypoint
+# compares it with the value it stored in the var volume to detect "this is a
+# new image" and then drops the stale cache and runs the migrations.
+RUN sha256sum composer.lock | cut -d' ' -f1 > .image-fingerprint \
+ && rm -rf var/cache/* \
+ && echo "image fingerprint: $(cat .image-fingerprint)"
 
 # ---------------------------------------------------------------------------
 # Stage 2: runtime (Apache + PHP; Node.js 22 + Composer for console tasks)
@@ -169,14 +200,19 @@ COPY --from=build /var/www/html /var/www/html
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/scheduler-entrypoint.sh /usr/local/bin/scheduler-entrypoint.sh
 COPY docker/configure-ssh-keys.sh /usr/local/bin/configure-ssh-keys.sh
+COPY docker/db-probe.php /usr/local/bin/db-probe.php
 COPY docker/sshd_config /etc/ssh/sshd_config
+
+# The deployment helper reports anonymous usage telemetry to Shopware unless
+# this is set. A self-hosted backup server should not phone home by default.
+ENV DO_NOT_TRACK=1
 
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/scheduler-entrypoint.sh /usr/local/bin/configure-ssh-keys.sh \
     && sed -i 's|/var/www/html|/var/www/html/public|' /etc/apache2/sites-available/000-default.conf \
     && printf '<Directory /var/www/html/public>\n    AllowOverride All\n    Require all granted\n</Directory>\n' \
        > /etc/apache2/conf-available/docroot.conf \
     && a2enconf docroot \
-    && mkdir -p /var/www/html/var \
+    && mkdir -p /var/www/html/var /var/www/html/files /var/www/html/public/media \
     && chown -R www-data:www-data /var/www/html
 
 EXPOSE 80 22
