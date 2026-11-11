@@ -9,13 +9,15 @@
 # this automatically; locally run:
 #   git clone https://github.com/muckiware/muckidrive.git muckidrive
 #
-# Plugins are added at build time — they do NOT live in muckidrive (which is
-# a general platform):
-#   - MuckiFacilityPlugin (github.com/muckiware/MuckiFacilityPlugin, tag below)
-#   - MuckiLogPlugin     (github.com/muckiware/MuckiLogPlugin, tag below)
-# The restic PHP client library (muckiware/restic, no Packagist) is cloned as
-# well — the custom/muckiware/* path repo in muckidrive's composer.json
-# picks it up.
+# Plugins are added at build time via composer (Packagist) — they do NOT live
+# in muckidrive (which is a general platform):
+#   - muckiware/facility-plugin      (MuckiFacilityPlugin, version below)
+#   - muckiware/facility-menu-plugin (MuckiFacilityMenuPlugin, version below)
+#   - muckiware/log-plugin           (MuckiLogPlugin, version below)
+# They are installed/activated/updated on every container start by
+# shopware/deployment-helper (docker/entrypoint.sh), because that needs a DB.
+# The restic PHP client library (muckiware/restic, no Packagist) is cloned —
+# the custom/muckiware/* path repo in muckidrive's composer.json picks it up.
 
 # ---------------------------------------------------------------------------
 # Stage 1: dependencies + administration build (discarded afterwards)
@@ -23,8 +25,10 @@
 FROM php:8.4-fpm-bookworm AS build
 
 ARG MUCKIDRIVE_REF=main
-ARG FACILITY_PLUGIN_REF=v0.8.0
-ARG LOG_PLUGIN_REF=v2.4.0
+ARG FACILITY_PLUGIN_VERSION=0.8.0
+ARG FACILITY_MENU_PLUGIN_VERSION=1.0.0
+ARG LOG_PLUGIN_VERSION=2.4.0
+ARG DEPLOYMENT_HELPER_VERSION=0.1.11
 ARG RESTIC_LIB_REF=v1.5.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -58,35 +62,38 @@ COPY muckidrive/src ./src
 COPY muckidrive/.htaccess ./
 COPY muckidrive/custom/muckiware ./custom/muckiware
 
-# --- MuckiSafe additions: plugins cloned from their public GitHub tags -----
-# Defensive cleanup first: local plugin checkouts inside the cloned
-# muckidrive tree (gitignored there) would collide with git clone.
-RUN rm -rf custom/muckiware/restic custom/plugins/MuckiFacilityPlugin custom/plugins/MuckiLogPlugin \
- && git clone --depth 1 --branch ${FACILITY_PLUGIN_REF} https://github.com/muckiware/MuckiFacilityPlugin.git custom/plugins/MuckiFacilityPlugin \
- && git clone --depth 1 --branch ${LOG_PLUGIN_REF} https://github.com/muckiware/MuckiLogPlugin.git custom/plugins/MuckiLogPlugin \
+# --- MuckiSafe additions -----------------------------------------------------
+# restic PHP client library (no Packagist) from its public GitHub tag.
+# Defensive cleanup first: local checkouts inside the cloned muckidrive tree
+# (gitignored there) would collide with git clone, and local plugin checkouts
+# in custom/plugins would shadow the Packagist packages via the path repo.
+RUN rm -rf custom/muckiware/restic \
+        custom/plugins/MuckiFacilityPlugin \
+        custom/plugins/MuckiFacilityMenuPlugin \
+        custom/plugins/MuckiLogPlugin \
  && git clone --depth 1 --branch ${RESTIC_LIB_REF} https://github.com/muckiware/restic.git custom/muckiware/restic \
- && rm -rf custom/plugins/MuckiFacilityPlugin/.git custom/plugins/MuckiLogPlugin/.git custom/muckiware/restic/.git
+ && rm -rf custom/muckiware/restic/.git
+
+# Plugins + shopware/deployment-helper from Packagist. custom/apps, custom/plugins and custom/static-plugins
+# are referenced by composer.json path repositories — create them so composer
+# does not fail on missing dirs.
+RUN mkdir -p custom/apps custom/plugins custom/static-plugins \
+ && composer require muckiware/facility-plugin:"${FACILITY_PLUGIN_VERSION}" --no-interaction --no-scripts \
+ && composer require muckiware/facility-menu-plugin:"${FACILITY_MENU_PLUGIN_VERSION}" --no-interaction --no-scripts \
+ && composer require muckiware/log-plugin:"${LOG_PLUGIN_VERSION}" --no-interaction --no-scripts \
+ && composer require shopware/deployment-helper:"${DEPLOYMENT_HELPER_VERSION}" --no-interaction --no-scripts \
+ && composer dump-autoload --optimize \
+ && composer install --no-dev --optimize-autoloader --no-interaction
 
 # muckidrive does not load the Shopware storefront bundle. The MuckiLogPlugin
 # storefront ErrorControllerDecorator (shipped in v2.4.0) decorates a service
 # that does not exist here and would break container compilation — the service
 # block is removed during the build (verified against SW 6.7.15.1).
-RUN sed -i '/<service id="MuckiLogPlugin\\Storefront\\Controller\\ErrorControllerDecorator"/,/<\/service>/d' \
-        custom/plugins/MuckiLogPlugin/src/Resources/config/services.xml \
- && ! grep -q ErrorControllerDecorator custom/plugins/MuckiLogPlugin/src/Resources/config/services.xml \
- && php -r 'exit(simplexml_load_file("custom/plugins/MuckiLogPlugin/src/Resources/config/services.xml") === false ? 1 : 0);' \
+RUN LOG_SERVICES=vendor/muckiware/log-plugin/src/Resources/config/services.xml \
+ && sed -i '/<service id="MuckiLogPlugin\\Storefront\\Controller\\ErrorControllerDecorator"/,/<\/service>/d' "$LOG_SERVICES" \
+ && ! grep -q ErrorControllerDecorator "$LOG_SERVICES" \
+ && php -r 'exit(simplexml_load_file($argv[1]) === false ? 1 : 0);' "$LOG_SERVICES" \
  && echo "MuckiLogPlugin services.xml patched and valid"
-
-# Register both plugins with composer (path repos custom/plugins/*, same as DDEV)
-# custom/apps and custom/static-plugins are referenced by composer.json path
-# repositories — create them so composer does not fail on missing dirs.
-RUN mkdir -p custom/apps custom/static-plugins \
- && composer require \
-        muckiware/facility-plugin:"*" \
-        muckiware/log-plugin:"*" \
-        --no-interaction --no-scripts \
- && composer dump-autoload --optimize \
- && composer install --no-dev --optimize-autoloader --no-interaction
 
 # Administration production build (no database required — verified:
 # bundle:dump, feature:dump, framework:schema and assets:install all run

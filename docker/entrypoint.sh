@@ -3,7 +3,7 @@ set -e
 
 # MuckiSafe container entrypoint
 # Waits for the database, installs the system on first boot,
-# keeps plugins installed/active, then starts Apache.
+# installs/updates all plugins via shopware/deployment-helper, then starts Apache.
 
 WAIT_TIMEOUT="${DB_WAIT_TIMEOUT:-60}"
 
@@ -53,6 +53,13 @@ fi
 export MUCKIWARE_ROOT="${MUCKIWARE_ROOT:-/var/www/html}"
 
 if ! bin/console system:is-installed >/dev/null 2>&1; then
+    # The deployment helper below needs at least one user to recognise the
+    # installation, so the admin user is mandatory on first boot.
+    if [ -z "$ADMIN_USERNAME" ] || [ -z "$ADMIN_PASSWORD" ]; then
+        log "ERROR: first installation requires ADMIN_USERNAME and ADMIN_PASSWORD."
+        exit 1
+    fi
+
     log "System not installed - running system:install ..."
     bin/console system:install -n \
         --create-database \
@@ -63,29 +70,45 @@ if ! bin/console system:is-installed >/dev/null 2>&1; then
         --skip-first-run-wizard \
         --no-assign-theme
 
-    bin/console -n plugin:refresh
-    bin/console -n plugin:install --activate MuckiLogPlugin MuckiFacilityPlugin
-    bin/console -n scheduled-task:register
+    log "Creating admin user '${ADMIN_USERNAME}' ..."
+    bin/console -n user:create \
+        --admin \
+        --password "$ADMIN_PASSWORD" \
+        --email "${ADMIN_EMAIL:-admin@example.com}" \
+        --firstName "${ADMIN_FIRSTNAME:-Admin}" \
+        --lastName "${ADMIN_LASTNAME:-User}" \
+        "$ADMIN_USERNAME"
 
-    if [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_PASSWORD" ]; then
-        log "Creating admin user '${ADMIN_USERNAME}' ..."
-        bin/console -n user:create \
-            --admin \
-            --password "$ADMIN_PASSWORD" \
-            --email "${ADMIN_EMAIL:-admin@example.com}" \
-            --firstName "${ADMIN_FIRSTNAME:-Admin}" \
-            --lastName "${ADMIN_LASTNAME:-User}" \
-            "$ADMIN_USERNAME"
-    else
-        log "NOTE: no ADMIN_USERNAME/ADMIN_PASSWORD set - create your user with 'bin/console user:create'."
-    fi
-
-    bin/console -n cache:clear
-    # Files created above are owned by root (entrypoint user); the web server
-    # runs as www-data and needs write access to var/ (cache, logs).
-    chown -R www-data:www-data var public
     log "First installation finished."
 fi
+
+# ------------------------------------------- plugins + updates (every boot)
+# shopware/deployment-helper on an installed system: runs migrations when the
+# shopware/core version changed, plugin:refresh, installs new plugins
+# (custom/plugins + composer-installed), updates outdated ones, activates
+# inactive ones and runs scheduled-task:register.
+#
+# The helper only considers a DB installed if it has at least one row in
+# `user` AND in `sales_channel`. Otherwise it would run its own fresh install
+# ("system:install --force") on the existing database — refuse instead.
+DEPLOYMENT_HELPER=vendor/bin/shopware-deployment-helper
+
+if ! "$DEPLOYMENT_HELPER" is-installed >/dev/null 2>&1; then
+    log "ERROR: the deployment helper does not recognise this installation."
+    log "       It needs at least one row in the 'user' and 'sales_channel' tables."
+    log "       Create an admin user with 'bin/console user:create --admin' and restart."
+    exit 1
+fi
+
+# No storefront in muckidrive: skip theme compilation. Assets are installed at
+# image build time (bin/build-administration.sh).
+log "Running shopware-deployment-helper ..."
+"$DEPLOYMENT_HELPER" run --skip-theme-compile --skip-assets-install
+bin/console -n cache:clear
+
+# Files created above are owned by root (entrypoint user); the web server
+# runs as www-data and needs write access to var/ (cache, logs).
+chown -R www-data:www-data var public
 
 # ------------------------------------------------------------- start Apache
 log "Starting Apache ..."

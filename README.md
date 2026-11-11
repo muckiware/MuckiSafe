@@ -13,6 +13,7 @@ What you get:
 - **Administration UI** (Vue 3) of muckidrive, pre-built at image build time
 - **MuckiFacilityPlugin** v0.8.0 — database backups, restic file backups, table cleanup
   (`muckiware:db:dump`, `muckiware:table:cleanup`, snapshot management)
+- **MuckiFacilityMenuPlugin** v1.0.0 — administration menu for the facility features
 - **MuckiLogPlugin** v2.4.0 — rotating log files, log levels, optional email alerts
 - **Node.js 22** and **Composer 2.7.7** inside the container for console and build tasks
 - **MySQL 8.4** and a **Supercronic scheduler** for Shopware background jobs
@@ -189,8 +190,11 @@ docker compose pull
 docker compose up -d
 ```
 
-On boot the entrypoint runs `system:is-installed`; existing installations are left
-untouched. Plugin updates arrive via new image versions.
+On boot the entrypoint runs `system:is-installed`; existing installations are not
+reinstalled. On every boot it then runs `vendor/bin/shopware-deployment-helper run`:
+migrations when the Shopware core version changed, installation of plugins added in
+a newer image, updates of outdated plugins, activation of inactive plugins and
+`scheduled-task:register`. Plugin updates arrive via new image versions.
 
 ## Building the image yourself
 
@@ -204,8 +208,12 @@ docker build -f docker/Dockerfile -t muckisafe:local .
 The build context is the MuckiSafe repository with the muckidrive platform cloned
 into `./muckidrive` (the CI workflow does exactly this). The Dockerfile copies
 the platform skeleton from `muckidrive/`, then adds the Muckiware plugins at
-build time — cloned from their public GitHub tags (MuckiFacilityPlugin v0.8.0,
-MuckiLogPlugin v2.4.0, restic PHP client v1.5.0). One muckidrive-specific patch
+build time via `composer require` from Packagist (MuckiFacilityPlugin v0.8.0,
+MuckiFacilityMenuPlugin v1.0.0, MuckiLogPlugin v2.4.0; versions are build args)
+plus the restic PHP client v1.5.0 cloned from its GitHub tag. The plugins are
+installed, activated and updated on every container start by
+[shopware/deployment-helper](https://github.com/shopware/deployment-helper)
+(`vendor/bin/shopware-deployment-helper run`, called from `docker/entrypoint.sh`). One muckidrive-specific patch
 is applied during the build: the MuckiLogPlugin storefront
 `ErrorControllerDecorator` service definition is removed, because muckidrive
 does not load the Shopware storefront bundle. See `docker/Dockerfile` for details.
