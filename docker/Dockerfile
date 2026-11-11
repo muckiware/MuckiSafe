@@ -45,8 +45,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 
 WORKDIR /var/www/html
 
-# Platform skeleton from the muckidrive checkout inside the build context
-COPY muckidrive/composer.json muckidrive/composer.lock muckidrive/symfony.lock ./
+# Platform skeleton from the muckidrive checkout inside the build context.
+# muckidrive does not commit a composer.lock: dependencies are resolved at
+# build time, so new muckiware/core and muckiware/master releases end up in
+# the image (muckidrive's composer.json bounds their versions).
+COPY muckidrive/composer.json muckidrive/symfony.lock ./
 COPY muckidrive/bin ./bin
 COPY muckidrive/config ./config
 COPY muckidrive/files ./files
