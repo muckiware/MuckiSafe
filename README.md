@@ -11,10 +11,14 @@ ghcr.io/muckiware/muckisafe:latest
 What you get:
 
 - **Administration UI** (Vue 3) of muckidrive, pre-built at image build time
-- **MuckiFacilityPlugin** v0.8.0 — database backups, restic file backups, table cleanup
+- **MuckiFacilityPlugin** — database backups, restic file backups, table cleanup
   (`muckiware:db:dump`, `muckiware:table:cleanup`, snapshot management)
 - **MuckiFacilityMenuPlugin** v1.0.0 — administration menu for the facility features
-- **MuckiLogPlugin** v2.4.0 — rotating log files, log levels, optional email alerts
+- **MuckiLogPlugin** — rotating log files, log levels, optional email alerts
+
+Every release contains the latest released version of MuckiFacilityPlugin and
+MuckiLogPlugin; the exact versions are listed in the
+[release notes](https://github.com/muckiware/MuckiSafe/releases).
 - **Node.js 22** and **Composer 2.7.7** inside the container for console and build tasks
 - **MySQL 8.4** and a **Supercronic scheduler** for Shopware background jobs
 - Optional **SSH access** as `root`, secured exclusively with one or more public keys
@@ -52,6 +56,7 @@ Then open **http://localhost:8080/admin** and log in with `ADMIN_USERNAME` /
 | `SCHEDULER_TIMEZONE` | – | Timezone used by Supercronic (default `Europe/Berlin`) |
 | `MAILER_DSN` | – | SMTP for MuckiLogPlugin email alerts (default `null://null`) |
 | `HTTP_PORT` | – | Host port for the admin UI (default `8080`) |
+| `MUCKISAFE_VERSION` | – | Image version to run, e.g. `v0.0.4` (default `latest` = most recent release) |
 | `SSH_PUBLIC_KEYS` | – | SSH public key **content** — one bare key per line, no file paths; empty disables SSH (see [SSH access](#ssh-access)) |
 | `SSH_PORT` | – | Host port for SSH (default `2222`) |
 
@@ -210,8 +215,9 @@ What happens on boot (`docker/entrypoint.sh`):
 The scheduler only runs its jobs while its own image fingerprint matches the
 applied one, so a scheduler of the previous image idles during an update.
 
-Plugin and platform updates arrive via new image versions; the plugin versions
-are build args in `docker/Dockerfile`.
+Plugin and platform updates arrive via new image versions. `latest` always
+points to the most recent release; to stay on a specific release, set
+`MUCKISAFE_VERSION` (e.g. `MUCKISAFE_VERSION=v0.0.4`) in `.env`.
 
 ### Persistent data
 
@@ -239,9 +245,11 @@ docker build -f docker/Dockerfile -t muckisafe:local .
 The build context is the MuckiSafe repository with the muckidrive platform cloned
 into `./muckidrive` (the CI workflow does exactly this). The Dockerfile copies
 the platform skeleton from `muckidrive/`, then adds the Muckiware plugins at
-build time via `composer require` from Packagist (MuckiFacilityPlugin v0.8.0,
-MuckiFacilityMenuPlugin v1.0.0, MuckiLogPlugin v2.4.0; versions are build args)
-plus the restic PHP client v1.5.0 cloned from its GitHub tag. The plugins are
+build time via `composer require` from Packagist (MuckiFacilityPlugin,
+MuckiFacilityMenuPlugin, MuckiLogPlugin; versions are build args with defaults
+in `docker/Dockerfile` — the CI workflow overrides the facility and log plugin
+versions with their latest release) plus the restic PHP client v1.5.0 cloned
+from its GitHub tag. The plugins are
 installed, activated and updated on every container start by
 [shopware/deployment-helper](https://github.com/shopware/deployment-helper)
 (`vendor/bin/shopware-deployment-helper run`, called from `docker/entrypoint.sh`).
@@ -257,34 +265,50 @@ v2.5.0 on the plugin ships it disabled). See `docker/Dockerfile` for details.
 The GitHub workflow in this repository checks out MuckiSafe, clones the
 [muckidrive](https://github.com/muckiware/muckidrive) platform into `./muckidrive`
 and builds `ghcr.io/muckiware/muckisafe` (multi-arch `linux/amd64` +
-`linux/arm64`) on every push to `main`, on version tags `v*` and weekly
-(to pick up platform updates). Builds from `main` are published as `edge`, a
-monotonically increasing `build-N` tag and a commit-specific `sha-...` tag.
-SemVer tag builds such as `v0.0.2` additionally publish `v0.0.2`, the moving
-patch-series tag `v0.0`, and `latest`; therefore `latest` always denotes the
-most recent stable release. A manual build with a specific platform version is
-possible via *Run workflow* (`muckidrive_ref` input) and receives `build-N` and
-`sha-...` tags as well.
+`linux/arm64`).
 
-A muckidrive platform release (`v*` tag) triggers this workflow automatically
-via a `repository_dispatch` event (`muckidrive-release`) with `muckidrive_ref`
-pinned to that platform tag, so every release build is traceable to a tagged
-platform version.
+### Releases and versions
 
-Releases of the platform packages trigger it as well:
-[muckiware/core](https://github.com/muckiware/core) sends
-`muckidrive-core-release` and [muckiware/master](https://github.com/muckiware/master)
-sends `muckidrive-master-release` (payload `package` + `ref`). These builds use
-the latest muckidrive release tag as platform source; composer resolves the new
-package version at build time (muckidrive does not commit a `composer.lock`).
-Builds are queued, so a joint core + master release does not run two builds in
-parallel. Every image carries the labels `io.muckiware.muckidrive.ref`,
-`io.muckiware.trigger` and `io.muckiware.trigger.ref`.
+One release is one version number and one image tag. Every release publishes
+exactly two image tags — its version (`vX.Y.Z`) and `latest` — and creates the
+matching Git tag and GitHub release. The release notes list the muckidrive and
+plugin versions inside the image.
 
-All three triggers require the `MUCKISAFE_DISPATCH_TOKEN` secret (a
-fine-grained PAT with *contents: write* on this repository) on the triggering
-repository (muckidrive, core, master); until it is configured, the release
-workflow there skips the trigger with a warning.
+| Trigger | Result |
+|---|---|
+| Git tag `vX.Y.Z` pushed manually (changes to MuckiSafe itself) | release `vX.Y.Z` |
+| Release of muckidrive, core, master, MuckiLogPlugin or MuckiFacilityPlugin | next patch release, created automatically |
+| *Run workflow* on `main` (optional `muckidrive_ref` input) | next patch release |
+| Push to `main`, pull request | test build (`linux/amd64`), nothing is published |
+
+Every build uses the latest release tag of muckidrive, MuckiFacilityPlugin and
+MuckiLogPlugin; `muckiware/core` and `muckiware/master` are resolved by
+composer at build time (muckidrive does not commit a `composer.lock`). Only an
+explicit `muckidrive_ref` (platform release event or manual input) overrides
+the platform version.
+
+### Release events
+
+The component repositories start a release with a `repository_dispatch` event:
+
+| Repository | Event type | Payload |
+|---|---|---|
+| [muckiware/muckidrive](https://github.com/muckiware/muckidrive) | `muckidrive-release` | `muckidrive_ref` |
+| [muckiware/core](https://github.com/muckiware/core) | `muckidrive-core-release` | `package`, `ref` |
+| [muckiware/master](https://github.com/muckiware/master) | `muckidrive-master-release` | `package`, `ref` |
+| [muckiware/MuckiLogPlugin](https://github.com/muckiware/MuckiLogPlugin) | `muckilog-plugin-release` | `package`, `ref` |
+| [muckiware/MuckiFacilityPlugin](https://github.com/muckiware/MuckiFacilityPlugin) | `muckifacility-plugin-release` | `package`, `ref` |
+
+Releases are queued, so components released together do not build in parallel
+or receive the same version number; when several are waiting, only the newest
+one runs — it contains all of them. Every image carries the labels
+`io.muckiware.muckidrive.ref`, `io.muckiware.facility-plugin.version`,
+`io.muckiware.log-plugin.version`, `io.muckiware.trigger` and
+`io.muckiware.trigger.ref`.
+
+All triggers require the `MUCKISAFE_DISPATCH_TOKEN` secret (a fine-grained PAT
+with *contents: write* on this repository) on the triggering repository; until
+it is configured, the release workflow there skips the trigger with a warning.
 
 ## Reverse proxy / HTTPS
 

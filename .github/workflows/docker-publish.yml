@@ -5,67 +5,132 @@ name: Build and publish the MuckiSafe Docker image
 # server. This workflow checks out MuckiSafe (Dockerfile, entrypoint, compose),
 # clones muckidrive into ./muckidrive as the application source and builds
 # ghcr.io/muckiware/muckisafe.
+#
+# Release model: one release = one version number = one image tag.
+#   - Git tag vX.Y.Z (pushed manually)        -> release vX.Y.Z
+#   - release of a component (dispatch event) -> next patch release, automatic
+#   - manual run on main                      -> next patch release
+#   - push to main / pull request             -> test build only, nothing published
+# A release publishes exactly two image tags (vX.Y.Z and latest) and creates
+# the matching Git tag and GitHub release.
 
 on:
   push:
     branches: [main]
     tags: ['v*']
+  pull_request:
   # muckidrive-release: platform release, payload {muckidrive_ref}
-  # muckidrive-core-release / muckidrive-master-release: package release,
-  # payload {package, ref} - built from the latest muckidrive release tag
+  # all other types: package/plugin release, payload {package, ref}
   repository_dispatch:
-    types: [muckidrive-release, muckidrive-core-release, muckidrive-master-release]
-  schedule:
-    - cron: '0 3 * * 1'   # weekly: pick up muckidrive/platform updates
+    types:
+      - muckidrive-release
+      - muckidrive-core-release
+      - muckidrive-master-release
+      - muckilog-plugin-release
+      - muckifacility-plugin-release
   workflow_dispatch:
     inputs:
       muckidrive_ref:
-        description: 'muckidrive git ref to build from (branch or tag)'
+        description: 'muckidrive git ref to build from (branch or tag); empty = latest muckidrive release'
         required: false
-        default: 'main'
+        default: ''
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: muckiware/muckisafe
-  # Passed via env (not interpolated into the shell command) to avoid
-  # command injection through the workflow_dispatch input.
-  # Priority: muckidrive release event payload > manual dispatch input > main.
-  # core/master release events override it with the latest muckidrive tag
-  # (step "Resolve muckidrive ref").
-  MUCKIDRIVE_REF: ${{ github.event.client_payload.muckidrive_ref || github.event.inputs.muckidrive_ref || 'main' }}
 
-# core and master are often released together: queue the second build instead
-# of running two image builds in parallel.
+# Releases share one queue, so two component releases never compute the same
+# version number or build in parallel. GitHub keeps only the newest waiting
+# run of a group: when several components are released together, the last
+# queued build wins - it contains all of them, because every build resolves
+# the latest component versions. Test builds queue per branch instead.
 concurrency:
-  group: muckisafe-image-${{ github.ref }}
+  group: ${{ ((github.event_name == 'push' && github.ref_type != 'tag') || github.event_name == 'pull_request') && format('muckisafe-check-{0}', github.ref) || 'muckisafe-release' }}
   cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # create the Git tag and GitHub release
       packages: write
     steps:
       - name: Checkout MuckiSafe (build recipe)
         uses: actions/checkout@v4
 
-      # The payload ref of a package release is a muckiware/core or
-      # muckiware/master tag, not a muckidrive ref. Build from the latest
-      # muckidrive release instead; composer resolves the new package version.
-      - name: Resolve muckidrive ref (package release)
-        if: github.event_name == 'repository_dispatch' && github.event.action != 'muckidrive-release'
+      - name: Determine release version
+        id: plan
+        run: |
+          PUBLISH=false
+          if [ "$GITHUB_EVENT_NAME" = "repository_dispatch" ]; then
+            PUBLISH=true
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            PUBLISH=true
+          elif [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            PUBLISH=true
+          fi
+
+          VERSION=""
+          if [ "$PUBLISH" = "true" ] && [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="$GITHUB_REF_NAME"
+            if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Tag ${VERSION} is not a release version (expected vX.Y.Z)."
+              exit 1
+            fi
+          elif [ "$PUBLISH" = "true" ]; then
+            # Automatic release: latest vX.Y.Z tag with the patch number raised.
+            LAST=$(git ls-remote --tags --refs --sort=-v:refname origin 'v*' \
+              | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | awk 'NR==1')
+            if [ -z "$LAST" ]; then
+              LAST="v0.0.0"
+            fi
+            VERSION="${LAST%.*}.$(( ${LAST##*.} + 1 ))"
+            echo "Latest release ${LAST} - releasing ${VERSION}."
+          else
+            echo "Test build - nothing will be published."
+          fi
+
+          echo "publish=${PUBLISH}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # Every build uses the latest released version of each component, so a
+      # release never falls back to an older plugin or platform version. An
+      # explicit muckidrive ref (platform release event or manual input) wins.
+      # Values reach the shell via env, never interpolated into the command,
+      # to avoid command injection through event payloads and inputs.
+      - name: Resolve component versions
         env:
+          EXPLICIT_MUCKIDRIVE_REF: ${{ github.event.client_payload.muckidrive_ref || github.event.inputs.muckidrive_ref }}
           TRIGGER_PACKAGE: ${{ github.event.client_payload.package }}
           TRIGGER_REF: ${{ github.event.client_payload.ref }}
         run: |
-          LATEST=$(git ls-remote --tags --refs --sort=-v:refname https://github.com/muckiware/muckidrive.git 'v*' | head -n 1 | sed 's#.*refs/tags/##')
-          if [ -z "$LATEST" ]; then
-            echo "::error::No muckidrive release tag (v*) found."
+          latest_release() {
+            git ls-remote --tags --refs --sort=-v:refname "https://github.com/muckiware/$1.git" 'v*' \
+              | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | awk 'NR==1'
+          }
+
+          MUCKIDRIVE_REF="$EXPLICIT_MUCKIDRIVE_REF"
+          if [ -z "$MUCKIDRIVE_REF" ]; then
+            MUCKIDRIVE_REF=$(latest_release muckidrive)
+          fi
+          FACILITY_TAG=$(latest_release MuckiFacilityPlugin)
+          LOG_TAG=$(latest_release MuckiLogPlugin)
+
+          if [ -z "$MUCKIDRIVE_REF" ] || [ -z "$FACILITY_TAG" ] || [ -z "$LOG_TAG" ]; then
+            echo "::error::Could not resolve a release tag (muckidrive='${MUCKIDRIVE_REF}', facility='${FACILITY_TAG}', log='${LOG_TAG}')."
             exit 1
           fi
-          echo "Triggered by ${TRIGGER_PACKAGE} ${TRIGGER_REF} - building from muckidrive ${LATEST}."
-          echo "MUCKIDRIVE_REF=${LATEST}" >> "$GITHUB_ENV"
+
+          if [ -n "$TRIGGER_PACKAGE" ]; then
+            echo "Triggered by ${TRIGGER_PACKAGE} ${TRIGGER_REF}."
+          fi
+          echo "muckidrive ${MUCKIDRIVE_REF}, facility-plugin ${FACILITY_TAG#v}, log-plugin ${LOG_TAG#v}"
+
+          {
+            echo "MUCKIDRIVE_REF=${MUCKIDRIVE_REF}"
+            echo "FACILITY_PLUGIN_VERSION=${FACILITY_TAG#v}"
+            echo "LOG_PLUGIN_VERSION=${LOG_TAG#v}"
+          } >> "$GITHUB_ENV"
 
       - name: Clone muckidrive platform (application source)
         run: git clone --depth 1 --branch "$MUCKIDRIVE_REF" https://github.com/muckiware/muckidrive.git muckidrive
@@ -77,6 +142,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
+        if: steps.plan.outputs.publish == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -88,22 +154,19 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # Keep the stable "latest" tag under explicit release control.
           flavor: |
             latest=false
+          # A release gets its version number and "latest" - nothing else.
+          # ("check" only names the unpublished image of a test build.)
           tags: |
-            # Stable release tags from SemVer Git tags (for example v0.0.2).
-            type=semver,pattern={{raw}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-
-            # Traceable tags for every main, scheduled, manual and release build.
-            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=build-${{ github.run_number }}
-            type=sha,prefix=sha-
-          # Trace which muckidrive ref and which release event built the image.
+            type=raw,value=${{ steps.plan.outputs.version || 'check' }}
+            type=raw,value=latest,enable=${{ steps.plan.outputs.publish == 'true' }}
+          # Trace what went into the image and which event built it. The
+          # commit is recorded as org.opencontainers.image.revision.
           labels: |
             io.muckiware.muckidrive.ref=${{ env.MUCKIDRIVE_REF }}
+            io.muckiware.facility-plugin.version=${{ env.FACILITY_PLUGIN_VERSION }}
+            io.muckiware.log-plugin.version=${{ env.LOG_PLUGIN_VERSION }}
             io.muckiware.trigger=${{ github.event.action || github.event_name }}
             io.muckiware.trigger.ref=${{ github.event.client_payload.ref || github.event.client_payload.muckidrive_ref || github.ref_name }}
 
@@ -112,16 +175,55 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # Test builds only need to prove that the image builds.
+          platforms: ${{ steps.plan.outputs.publish == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           # CACHE_BUST: muckidrive has no composer.lock, so the composer
           # layer must be re-resolved on every run. Otherwise it is restored
           # from the GHA cache and a core/master/plugin release never reaches
           # the image. Layers before it (apt, PHP extensions, Node) stay cached.
           build-args: |
             MUCKIDRIVE_REF=${{ env.MUCKIDRIVE_REF }}
+            FACILITY_PLUGIN_VERSION=${{ env.FACILITY_PLUGIN_VERSION }}
+            LOG_PLUGIN_VERSION=${{ env.LOG_PLUGIN_VERSION }}
             CACHE_BUST=${{ github.run_id }}-${{ github.run_attempt }}
-          push: true
+          push: ${{ steps.plan.outputs.publish == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Last step on purpose: a version number only exists once its image
+      # does. For automatic releases this also creates the Git tag; a tag
+      # created with GITHUB_TOKEN does not start another workflow run.
+      - name: Create GitHub release
+        if: steps.plan.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          TRIGGER: ${{ github.event.action || github.event_name }}
+        run: |
+          if gh release view "$VERSION" > /dev/null 2>&1; then
+            echo "GitHub release ${VERSION} already exists - nothing to do."
+            exit 0
+          fi
+
+          {
+            echo "Image: \`${REGISTRY}/${IMAGE_NAME}:${VERSION}\`"
+            echo
+            echo "| Component | Version |"
+            echo "|---|---|"
+            echo "| muckidrive | ${MUCKIDRIVE_REF} |"
+            echo "| MuckiFacilityPlugin | ${FACILITY_PLUGIN_VERSION} |"
+            echo "| MuckiLogPlugin | ${LOG_PLUGIN_VERSION} |"
+            echo
+            echo "Built by: ${TRIGGER}"
+          } > release-notes.md
+
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            gh release create "$VERSION" --verify-tag --title "$VERSION" \
+              --notes-file release-notes.md --generate-notes
+          else
+            gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" \
+              --notes-file release-notes.md --generate-notes
+          fi
