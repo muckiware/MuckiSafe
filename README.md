@@ -249,7 +249,11 @@ build time via `composer require` from Packagist (MuckiFacilityPlugin,
 MuckiFacilityMenuPlugin, MuckiLogPlugin; versions are build args with defaults
 in `docker/Dockerfile` — the CI workflow overrides the facility and log plugin
 versions with their latest release) plus the restic PHP client v1.5.0 cloned
-from its GitHub tag. The plugins are
+from its GitHub tag. The restic binary itself comes from the official restic
+GitHub release, not from Debian (bookworm only ships 0.14.0, which is too old
+for the plugin): the version is the build arg `RESTIC_VERSION` (default 0.17.3)
+together with `RESTIC_SHA256_AMD64` / `RESTIC_SHA256_ARM64`, which must match
+the release's `SHA256SUMS`. The plugins are
 installed, activated and updated on every container start by
 [shopware/deployment-helper](https://github.com/shopware/deployment-helper)
 (`vendor/bin/shopware-deployment-helper run`, called from `docker/entrypoint.sh`).

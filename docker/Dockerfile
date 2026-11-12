@@ -149,13 +149,20 @@ ARG COMPOSER_VERSION=2.7.7
 ARG SUPERCRONIC_VERSION=v0.2.51
 ARG SUPERCRONIC_SHA256_AMD64=cc232108374e8e2b537045f2d5eaa1229f619db314c3ba6a14d38b35dc0aa123
 ARG SUPERCRONIC_SHA256_ARM64=4ae22576a78223d8ccdf5f3b3660a5cbb5288416bf0ca96afc4a36d195932b94
+# restic binary from the official GitHub release. Debian bookworm only ships
+# restic 0.14.0, which ignores --json on `restic init`; muckiware/restic needs
+# >= 0.15. When changing RESTIC_VERSION, update both checksums from the
+# release's SHA256SUMS file (restic_<version>_linux_<arch>.bz2).
+ARG RESTIC_VERSION=0.17.3
+ARG RESTIC_SHA256_AMD64=5097faeda6aa13167aae6e36efdba636637f8741fed89bbf015678334632d4d3
+ARG RESTIC_SHA256_ARM64=db27b803534d301cef30577468cf61cb2e242165b8cd6d8cd6efd7001be2e557
 
 # Debian locks root by default. Give it a discarded random password hash so
 # OpenSSH permits public-key login; sshd_config still disables all password
 # and interactive authentication.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates openssl passwd restic netcat-openbsd util-linux tzdata openssh-server \
-        git unzip \
+        curl ca-certificates openssl passwd netcat-openbsd util-linux tzdata openssh-server \
+        git unzip bzip2 \
         libzip-dev libicu-dev libpng-dev libjpeg-dev libfreetype6-dev libsodium-dev \
     && ROOT_SSH_PASSWORD="$(openssl rand -base64 48)" \
     && ROOT_SSH_HASH="$(printf '%s' "$ROOT_SSH_PASSWORD" | openssl passwd -6 -stdin)" \
@@ -174,6 +181,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /etc/ssh/ssh_host_* \
     && a2enmod rewrite headers
+
+# Pinned restic release binary, installed to the path the Debian package used.
+RUN case "${TARGETARCH}" in \
+        amd64) RESTIC_SHA256="${RESTIC_SHA256_AMD64}" ;; \
+        arm64) RESTIC_SHA256="${RESTIC_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL \
+        "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_${TARGETARCH}.bz2" \
+        -o /tmp/restic.bz2 \
+    && echo "${RESTIC_SHA256}  /tmp/restic.bz2" | sha256sum -c - \
+    && bunzip2 -c /tmp/restic.bz2 > /usr/bin/restic \
+    && rm /tmp/restic.bz2 \
+    && chmod +x /usr/bin/restic \
+    && restic version
 
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j"$(nproc)" \
