@@ -13,17 +13,18 @@ What you get:
 - **Administration UI** (Vue 3) of muckidrive, pre-built at image build time
 - **MuckiFacilityPlugin** — database backups, restic file backups, table cleanup
   (`muckiware:db:dump`, `muckiware:table:cleanup`, snapshot management)
-- **MuckiFacilityMenuPlugin** v1.0.0 — administration menu for the facility features
+- **MuckiFacilityMenuPlugin** — administration menu for the facility features
 - **MuckiLogPlugin** — rotating log files, log levels, optional email alerts
-
-Every release contains the latest released version of MuckiFacilityPlugin and
-MuckiLogPlugin; the exact versions are listed in the
-[release notes](https://github.com/muckiware/MuckiSafe/releases).
 - **Node.js 22** and **Composer 2.7.7** inside the container for console and build tasks
 - **MySQL 8.4** and a **Supercronic scheduler** for Shopware background jobs
 - Optional **SSH access** as `root`, secured exclusively with one or more public keys
 - First-boot installation: system + plugins + admin user are created automatically from
   environment variables — no SQL dump, no manual `system:install`
+
+Every release contains the newest mutually compatible releases of the three
+plugins; the exact versions are listed in the
+[release notes](https://github.com/muckiware/MuckiSafe/releases) and in
+`/var/www/html/.muckisafe-versions` inside the container.
 
 ## Quick start
 
@@ -246,10 +247,14 @@ The build context is the MuckiSafe repository with the muckidrive platform clone
 into `./muckidrive` (the CI workflow does exactly this). The Dockerfile copies
 the platform skeleton from `muckidrive/`, then adds the Muckiware plugins at
 build time via `composer require` from Packagist (MuckiFacilityPlugin,
-MuckiFacilityMenuPlugin, MuckiLogPlugin; versions are build args with defaults
-in `docker/Dockerfile` — the CI workflow overrides the facility and log plugin
-versions with their latest release) plus the restic PHP client v1.5.0 cloned
-from its GitHub tag. The restic binary itself comes from the official restic
+MuckiFacilityMenuPlugin, MuckiLogPlugin). Their versions are composer
+constraints passed as build args (`FACILITY_PLUGIN_VERSION`,
+`FACILITY_MENU_PLUGIN_VERSION`, `LOG_PLUGIN_VERSION`); the default `*` makes
+composer pick the newest stable release of each plugin that is compatible with
+the others. Pass e.g. `--build-arg FACILITY_PLUGIN_VERSION=0.9.0` to pin one.
+The restic PHP client library comes from Packagist as a dependency of
+MuckiFacilityPlugin. The resolved versions are written to
+`/var/www/html/.muckisafe-versions`. The restic binary itself comes from the official restic
 GitHub release, not from Debian (bookworm only ships 0.14.0, which is too old
 for the plugin): the version is the build arg `RESTIC_VERSION` (default 0.17.3)
 together with `RESTIC_SHA256_AMD64` / `RESTIC_SHA256_ARM64`, which must match
@@ -281,15 +286,18 @@ plugin versions inside the image.
 | Trigger | Result |
 |---|---|
 | Git tag `vX.Y.Z` pushed manually (changes to MuckiSafe itself) | release `vX.Y.Z` |
-| Release of muckidrive, core, master, MuckiLogPlugin or MuckiFacilityPlugin | next patch release, created automatically |
+| Release of muckidrive, core, master, MuckiLogPlugin, MuckiFacilityPlugin or MuckiFacilityMenuPlugin | next patch release, created automatically |
 | *Run workflow* on `main` (optional `muckidrive_ref` input) | next patch release |
 | Push to `main`, pull request | test build (`linux/amd64`), nothing is published |
 
-Every build uses the latest release tag of muckidrive, MuckiFacilityPlugin and
-MuckiLogPlugin; `muckiware/core` and `muckiware/master` are resolved by
-composer at build time (muckidrive does not commit a `composer.lock`). Only an
-explicit `muckidrive_ref` (platform release event or manual input) overrides
-the platform version.
+Every build uses the latest release tag of muckidrive; only an explicit
+`muckidrive_ref` (platform release event or manual input) overrides it.
+`muckiware/core`, `muckiware/master` and the three plugins are resolved by
+composer at build time (muckidrive does not commit a `composer.lock`): each
+plugin gets its newest stable release that is compatible with the others. A
+plugin release pins only that plugin to the released version, so the build
+fails visibly if a sibling plugin does not accept it yet (release a compatible
+version of the sibling, then re-run the failed build).
 
 ### Release events
 
@@ -302,13 +310,14 @@ The component repositories start a release with a `repository_dispatch` event:
 | [muckiware/master](https://github.com/muckiware/master) | `muckidrive-master-release` | `package`, `ref` |
 | [muckiware/MuckiLogPlugin](https://github.com/muckiware/MuckiLogPlugin) | `muckilog-plugin-release` | `package`, `ref` |
 | [muckiware/MuckiFacilityPlugin](https://github.com/muckiware/MuckiFacilityPlugin) | `muckifacility-plugin-release` | `package`, `ref` |
+| [muckiware/MuckiFacilityMenuPlugin](https://github.com/muckiware/MuckiFacilityMenuPlugin) | `muckifacility-menu-plugin-release` | `package`, `ref` |
 
 Releases are queued, so components released together do not build in parallel
 or receive the same version number; when several are waiting, only the newest
 one runs — it contains all of them. Every image carries the labels
-`io.muckiware.muckidrive.ref`, `io.muckiware.facility-plugin.version`,
-`io.muckiware.log-plugin.version`, `io.muckiware.trigger` and
-`io.muckiware.trigger.ref`.
+`io.muckiware.muckidrive.ref`, `io.muckiware.trigger` and
+`io.muckiware.trigger.ref`; the plugin versions composer resolved are listed in
+`/var/www/html/.muckisafe-versions` inside the image and in the release notes.
 
 All triggers require the `MUCKISAFE_DISPATCH_TOKEN` secret (a fine-grained PAT
 with *contents: write* on this repository) on the triggering repository; until

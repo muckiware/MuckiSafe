@@ -11,13 +11,17 @@
 #
 # Plugins are added at build time via composer (Packagist) — they do NOT live
 # in muckidrive (which is a general platform):
-#   - muckiware/facility-plugin      (MuckiFacilityPlugin, version below)
-#   - muckiware/facility-menu-plugin (MuckiFacilityMenuPlugin, version below)
-#   - muckiware/log-plugin           (MuckiLogPlugin, version below)
+#   - muckiware/facility-plugin      (MuckiFacilityPlugin)
+#   - muckiware/facility-menu-plugin (MuckiFacilityMenuPlugin)
+#   - muckiware/log-plugin           (MuckiLogPlugin)
+# Their versions are composer constraints (build args below). The default "*"
+# lets composer pick the newest stable release of each plugin that fits the
+# other plugins' requirements, so plugin releases never need a change here.
+# The CI workflow pins only the plugin whose release triggered the build.
 # They are installed/activated/updated on every container start by
 # shopware/deployment-helper (docker/entrypoint.sh), because that needs a DB.
-# The restic PHP client library (muckiware/restic, no Packagist) is cloned —
-# the custom/muckiware/* path repo in muckidrive's composer.json picks it up.
+# The restic PHP client library (muckiware/restic) comes from Packagist as a
+# dependency of facility-plugin; its version is bounded by that plugin.
 
 # ---------------------------------------------------------------------------
 # Stage 1: dependencies + administration build (discarded afterwards)
@@ -25,11 +29,10 @@
 FROM php:8.4-fpm-bookworm AS build
 
 ARG MUCKIDRIVE_REF=main
-ARG FACILITY_PLUGIN_VERSION=0.8.0
-ARG FACILITY_MENU_PLUGIN_VERSION=1.0.0
-ARG LOG_PLUGIN_VERSION=2.4.0
+ARG FACILITY_PLUGIN_VERSION=*
+ARG FACILITY_MENU_PLUGIN_VERSION=*
+ARG LOG_PLUGIN_VERSION=*
 ARG DEPLOYMENT_HELPER_VERSION=0.1.11
-ARG RESTIC_LIB_REF=v1.5.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git unzip curl jq ca-certificates \
@@ -63,16 +66,13 @@ COPY muckidrive/.htaccess ./
 COPY muckidrive/custom/muckiware ./custom/muckiware
 
 # --- MuckiSafe additions -----------------------------------------------------
-# restic PHP client library (no Packagist) from its public GitHub tag.
-# Defensive cleanup first: local checkouts inside the cloned muckidrive tree
-# (gitignored there) would collide with git clone, and local plugin checkouts
-# in custom/plugins would shadow the Packagist packages via the path repo.
+# Defensive cleanup: local checkouts inside the cloned muckidrive tree
+# (gitignored there) would shadow the Packagist packages, because composer
+# path repositories are canonical and take priority over Packagist.
 RUN rm -rf custom/muckiware/restic \
         custom/plugins/MuckiFacilityPlugin \
         custom/plugins/MuckiFacilityMenuPlugin \
-        custom/plugins/MuckiLogPlugin \
- && git clone --depth 1 --branch ${RESTIC_LIB_REF} https://github.com/muckiware/restic.git custom/muckiware/restic \
- && rm -rf custom/muckiware/restic/.git
+        custom/plugins/MuckiLogPlugin
 
 # muckidrive does not commit a composer.lock, so the composer step below must
 # re-resolve on every build. Docker cannot see that Packagist changed: without
@@ -138,6 +138,15 @@ RUN bash bin/build-administration.sh
 RUN sha256sum composer.lock | cut -d' ' -f1 > .image-fingerprint \
  && rm -rf var/cache/* \
  && echo "image fingerprint: $(cat .image-fingerprint)"
+
+# Component versions composer actually resolved ("<package> <version>" per
+# line). The CI workflow reads this file from the published image for the
+# release notes; "cat /var/www/html/.muckisafe-versions" shows it at runtime.
+RUN composer show --locked --format=json \
+    | jq -r '.locked[] | select(.name | test("^muckiware/|^shopware/deployment-helper$")) | "\(.name) \(.version | ltrimstr("v"))"' \
+    > .muckisafe-versions \
+ && test -s .muckisafe-versions \
+ && cat .muckisafe-versions
 
 # ---------------------------------------------------------------------------
 # Stage 2: runtime (Apache + PHP; Node.js 22 + Composer for console tasks)

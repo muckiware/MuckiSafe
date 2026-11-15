@@ -28,6 +28,7 @@ on:
       - muckidrive-master-release
       - muckilog-plugin-release
       - muckifacility-plugin-release
+      - muckifacility-menu-plugin-release
   workflow_dispatch:
     inputs:
       muckidrive_ref:
@@ -93,9 +94,14 @@ jobs:
           echo "publish=${PUBLISH}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      # Every build uses the latest released version of each component, so a
-      # release never falls back to an older plugin or platform version. An
-      # explicit muckidrive ref (platform release event or manual input) wins.
+      # Platform: the latest muckidrive release, unless an explicit ref
+      # (platform release event or manual input) is given.
+      # Plugins: composer constraints. "*" lets composer pick the newest
+      # stable release of each plugin that is compatible with the others, so
+      # a plugin release can never break the build by being pinned next to a
+      # sibling that does not accept it yet. Only the plugin whose release
+      # triggered this run is pinned to exactly that version - the build then
+      # fails loudly instead of silently shipping an older version.
       # Values reach the shell via env, never interpolated into the command,
       # to avoid command injection through event payloads and inputs.
       - name: Resolve component versions
@@ -104,32 +110,45 @@ jobs:
           TRIGGER_PACKAGE: ${{ github.event.client_payload.package }}
           TRIGGER_REF: ${{ github.event.client_payload.ref }}
         run: |
-          latest_release() {
-            git ls-remote --tags --refs --sort=-v:refname "https://github.com/muckiware/$1.git" 'v*' \
-              | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | awk 'NR==1'
-          }
-
           MUCKIDRIVE_REF="$EXPLICIT_MUCKIDRIVE_REF"
           if [ -z "$MUCKIDRIVE_REF" ]; then
-            MUCKIDRIVE_REF=$(latest_release muckidrive)
+            MUCKIDRIVE_REF=$(git ls-remote --tags --refs --sort=-v:refname https://github.com/muckiware/muckidrive.git 'v*' \
+              | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | awk 'NR==1')
           fi
-          FACILITY_TAG=$(latest_release MuckiFacilityPlugin)
-          LOG_TAG=$(latest_release MuckiLogPlugin)
-
-          if [ -z "$MUCKIDRIVE_REF" ] || [ -z "$FACILITY_TAG" ] || [ -z "$LOG_TAG" ]; then
-            echo "::error::Could not resolve a release tag (muckidrive='${MUCKIDRIVE_REF}', facility='${FACILITY_TAG}', log='${LOG_TAG}')."
+          if [ -z "$MUCKIDRIVE_REF" ]; then
+            echo "::error::Could not resolve a muckidrive release tag."
             exit 1
           fi
 
+          FACILITY_PLUGIN_VERSION='*'
+          FACILITY_MENU_PLUGIN_VERSION='*'
+          LOG_PLUGIN_VERSION='*'
+
           if [ -n "$TRIGGER_PACKAGE" ]; then
             echo "Triggered by ${TRIGGER_PACKAGE} ${TRIGGER_REF}."
+            case "$TRIGGER_PACKAGE" in
+              muckiware/facility-plugin|muckiware/facility-menu-plugin|muckiware/log-plugin)
+                if ! printf '%s' "$TRIGGER_REF" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
+                  echo "::error::Trigger ref '${TRIGGER_REF}' is not a release version (vX.Y.Z)."
+                  exit 1
+                fi
+                PINNED="${TRIGGER_REF#v}"
+                case "$TRIGGER_PACKAGE" in
+                  muckiware/facility-plugin)      FACILITY_PLUGIN_VERSION="$PINNED" ;;
+                  muckiware/facility-menu-plugin) FACILITY_MENU_PLUGIN_VERSION="$PINNED" ;;
+                  muckiware/log-plugin)           LOG_PLUGIN_VERSION="$PINNED" ;;
+                esac
+                ;;
+            esac
           fi
-          echo "muckidrive ${MUCKIDRIVE_REF}, facility-plugin ${FACILITY_TAG#v}, log-plugin ${LOG_TAG#v}"
+
+          echo "muckidrive ${MUCKIDRIVE_REF}, facility-plugin '${FACILITY_PLUGIN_VERSION}', facility-menu-plugin '${FACILITY_MENU_PLUGIN_VERSION}', log-plugin '${LOG_PLUGIN_VERSION}'"
 
           {
             echo "MUCKIDRIVE_REF=${MUCKIDRIVE_REF}"
-            echo "FACILITY_PLUGIN_VERSION=${FACILITY_TAG#v}"
-            echo "LOG_PLUGIN_VERSION=${LOG_TAG#v}"
+            echo "FACILITY_PLUGIN_VERSION=${FACILITY_PLUGIN_VERSION}"
+            echo "FACILITY_MENU_PLUGIN_VERSION=${FACILITY_MENU_PLUGIN_VERSION}"
+            echo "LOG_PLUGIN_VERSION=${LOG_PLUGIN_VERSION}"
           } >> "$GITHUB_ENV"
 
       - name: Clone muckidrive platform (application source)
@@ -162,11 +181,11 @@ jobs:
             type=raw,value=${{ steps.plan.outputs.version || 'check' }}
             type=raw,value=latest,enable=${{ steps.plan.outputs.publish == 'true' }}
           # Trace what went into the image and which event built it. The
-          # commit is recorded as org.opencontainers.image.revision.
+          # commit is recorded as org.opencontainers.image.revision. Plugin
+          # versions are resolved by composer during the build and are listed
+          # in /var/www/html/.muckisafe-versions inside the image instead.
           labels: |
             io.muckiware.muckidrive.ref=${{ env.MUCKIDRIVE_REF }}
-            io.muckiware.facility-plugin.version=${{ env.FACILITY_PLUGIN_VERSION }}
-            io.muckiware.log-plugin.version=${{ env.LOG_PLUGIN_VERSION }}
             io.muckiware.trigger=${{ github.event.action || github.event_name }}
             io.muckiware.trigger.ref=${{ github.event.client_payload.ref || github.event.client_payload.muckidrive_ref || github.ref_name }}
 
@@ -184,6 +203,7 @@ jobs:
           build-args: |
             MUCKIDRIVE_REF=${{ env.MUCKIDRIVE_REF }}
             FACILITY_PLUGIN_VERSION=${{ env.FACILITY_PLUGIN_VERSION }}
+            FACILITY_MENU_PLUGIN_VERSION=${{ env.FACILITY_MENU_PLUGIN_VERSION }}
             LOG_PLUGIN_VERSION=${{ env.LOG_PLUGIN_VERSION }}
             CACHE_BUST=${{ github.run_id }}-${{ github.run_attempt }}
           push: ${{ steps.plan.outputs.publish == 'true' }}
@@ -208,17 +228,25 @@ jobs:
             exit 0
           fi
 
+          # The versions composer actually resolved, read from the published
+          # image (the runner is linux/amd64, so only that variant is pulled).
+          IMAGE="${REGISTRY}/${IMAGE_NAME}:${VERSION}"
+          docker run --rm --pull always --platform linux/amd64 --entrypoint cat \
+            "$IMAGE" /var/www/html/.muckisafe-versions > component-versions.txt
+
           {
-            echo "Image: \`${REGISTRY}/${IMAGE_NAME}:${VERSION}\`"
+            echo "Image: \`${IMAGE}\`"
             echo
             echo "| Component | Version |"
             echo "|---|---|"
             echo "| muckidrive | ${MUCKIDRIVE_REF} |"
-            echo "| MuckiFacilityPlugin | ${FACILITY_PLUGIN_VERSION} |"
-            echo "| MuckiLogPlugin | ${LOG_PLUGIN_VERSION} |"
+            while read -r PACKAGE PACKAGE_VERSION; do
+              [ -n "$PACKAGE" ] && echo "| ${PACKAGE} | ${PACKAGE_VERSION} |"
+            done < component-versions.txt
             echo
             echo "Built by: ${TRIGGER}"
           } > release-notes.md
+          cat release-notes.md
 
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             gh release create "$VERSION" --verify-tag --title "$VERSION" \
