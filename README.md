@@ -60,6 +60,7 @@ Then open **http://localhost:8080/admin** and log in with `ADMIN_USERNAME` /
 | `MUCKISAFE_VERSION` | – | Image version to run, e.g. `v0.0.4` (default `latest` = most recent release) |
 | `SSH_PUBLIC_KEYS` | – | SSH public key **content** — one bare key per line, no file paths; empty disables SSH (see [SSH access](#ssh-access)) |
 | `SSH_PORT` | – | Host port for SSH (default `2222`) |
+| `BACKUP_REPOS_PATH` | – | Host directory for backup repositories — only used together with the [override](#backup-repositories-on-the-host) from `docker-compose.override.yml` (default `./backup-repos`) |
 
 ## SSH access
 
@@ -187,6 +188,70 @@ docker compose logs -f scheduler
 `flock` prevents a second copy of the same command from starting while the
 previous invocation is still running.
 
+## Backup repositories on the host
+
+A backup repository of MuckiFacilityPlugin lives wherever its `repository_path`
+points — a free local path inside the container. Without further configuration
+that path is just a directory inside the container: the repository is lost
+whenever the container is recreated, i.e. on every image update.
+
+To create and write repositories **outside** the container — directly visible
+and writable on the Docker host — bind-mount a host directory into both
+services with a Compose override. Docker Compose merges a
+`docker-compose.override.yml` next to `docker-compose.yml` automatically; the
+base compose file stays untouched:
+
+```yaml
+services:
+  app:
+    volumes:
+      - ${BACKUP_REPOS_PATH:-./backup-repos}:/var/backups/muckisafe
+
+  scheduler:
+    volumes:
+      - ${BACKUP_REPOS_PATH:-./backup-repos}:/var/backups/muckisafe
+```
+
+**Both services need the mount.** Backups run in the `app` container (manual
+runs from the administration) as well as in the `scheduler` container
+(scheduled runs); a mount on only one of them leads to the error
+`Repository path does not exist` on the other path.
+
+Create the host directory before the next start (otherwise Docker creates it
+owned by `root`), then recreate the stack:
+
+```bash
+mkdir -p backup-repos
+docker compose up -d
+```
+
+In the administration, create the repository with a `repository_path` under
+the mount, e.g. `/var/backups/muckisafe/shop-db` — restic creates the
+repository directory itself, the mount point must exist. Everything restic
+writes lands live in `./backup-repos` on the host, so you can sync it to
+another disk, or inspect it with a locally installed restic:
+
+```bash
+restic -r backup-repos/shop-db snapshots
+```
+
+Notes:
+
+- **Linux hosts:** backups run as `www-data` (UID 33). The host directory must
+  be writable by that UID — `sudo chown -R 33:33 ./backup-repos`. Docker
+  Desktop on macOS/Windows maps container writes to your host user
+  automatically, so no `chown` is needed there.
+- `BACKUP_REPOS_PATH` in `.env` redirects the mount (default `./backup-repos`).
+  When you change it, move the existing repository directories along —
+  otherwise the plugin reports `Repository path does not exist`.
+- The override merges automatically only when you run `docker compose` without
+  explicit `-f` files. The SSH stack from [SSH access](#ssh-access) uses `-f`;
+  include the override there explicitly:
+
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.ssh.yml -f docker-compose.override.yml up -d
+  ```
+
 ## Upgrades
 
 The container checks nothing automatically. To upgrade:
@@ -233,6 +298,11 @@ points to the most recent release; to stay on a specific release, set
 Everything else inside the container comes from the image and is replaced on
 every update. `app-files` and `app-media` were added later: when updating an
 older deployment, download the current `docker-compose.yml` first.
+
+Backup repositories are not part of these volumes by default — a repository
+created in the administration lives inside the container and is lost on every
+image update, unless you add the bind mount from
+[Backup repositories on the host](#backup-repositories-on-the-host).
 
 ## Building the image yourself
 

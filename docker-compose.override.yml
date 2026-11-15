@@ -1,0 +1,14 @@
+# Local override: bind-mount the backup repositories to the host.
+# docker compose merges this file automatically into the base stack
+# (works as long as the stack is started without explicit -f files).
+# Override the host location via BACKUP_REPOS_PATH in .env.
+services:
+  app:
+    volumes:
+      - ${BACKUP_REPOS_PATH:-./backup-repos}:/var/backups/muckisafe
+      - ${RESTORE_REPOS_PATH:-./backup-repos}:/var/restores/muckisafe
+
+  scheduler:
+    volumes:
+      - ${BACKUP_REPOS_PATH:-./backup-repos}:/var/backups/muckisafe
+      - ${RESTORE_REPOS_PATH:-./backup-repos}:/var/restores/muckisafe
