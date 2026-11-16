@@ -26,6 +26,14 @@ services:
       APP_URL: ${APP_URL}
       APP_SECRET: ${APP_SECRET}
       INSTANCE_ID: ${INSTANCE_ID}
+      # Reverse proxy / TLS termination: X-Forwarded-* headers are only trusted
+      # from the sources in SYMFONY_TRUSTED_PROXIES (empty = none). Without it
+      # a TLS proxy makes the app generate http:// asset URLs behind https://
+      # (mixed content, blocked admin UI) — see README "Reverse proxy / HTTPS".
+      # The default header list keeps a missing SYMFONY_TRUSTED_HEADERS
+      # boot-safe: proxies without headers abort the kernel boot.
+      SYMFONY_TRUSTED_PROXIES: ${SYMFONY_TRUSTED_PROXIES:-}
+      SYMFONY_TRUSTED_HEADERS: ${SYMFONY_TRUSTED_HEADERS:-x-forwarded-for,x-forwarded-host,x-forwarded-port,x-forwarded-proto}
       # SSH is disabled when this is empty. Put multiple keys on separate lines;
       # configure-ssh-keys.sh also accepts a literal backslash-n separator.
       SSH_PUBLIC_KEYS: ${SSH_PUBLIC_KEYS:-}

@@ -57,6 +57,8 @@ Then open **http://localhost:8080/admin** and log in with `ADMIN_USERNAME` /
 | `SCHEDULER_TIMEZONE` | – | Timezone used by Supercronic (default `Europe/Berlin`) |
 | `MAILER_DSN` | – | SMTP for MuckiLogPlugin email alerts (default `null://null`) |
 | `HTTP_PORT` | – | Host port for the admin UI (default `8080`) |
+| `SYMFONY_TRUSTED_PROXIES` | – | Behind a TLS proxy: proxy IPs/CIDRs whose X-Forwarded-* headers are trusted, e.g. `192.168.1.10,172.16.0.0/12` or `private_ranges` (default: empty = no trusted proxies, see [Reverse proxy / HTTPS](#reverse-proxy--https)) |
+| `SYMFONY_TRUSTED_HEADERS` | – | X-Forwarded headers honored from trusted proxies (default: `x-forwarded-for,x-forwarded-host,x-forwarded-port,x-forwarded-proto`; must not be empty while `SYMFONY_TRUSTED_PROXIES` is set) |
 | `MUCKISAFE_VERSION` | – | Image version to run, e.g. `v0.0.4` (default `latest` = most recent release) |
 | `SSH_PUBLIC_KEYS` | – | SSH public key **content** — one bare key per line, no file paths; empty disables SSH (see [SSH access](#ssh-access)) |
 | `SSH_PORT` | – | Host port for SSH (default `2222`) |
@@ -400,9 +402,50 @@ The compose file publishes plain HTTP on `HTTP_PORT`. Put your own reverse proxy
 
 ```
 muckisafe.example.com {
+    redir / /admin 302
     reverse_proxy localhost:8080
 }
 ```
+
+The `redir` line is optional: the application has no storefront, so the root
+path returns 404 — this sends visitors of `https://…/` conveniently to `/admin`.
+The `/admin` path itself passes through the proxy unchanged and all admin API
+calls use the same host, so no path rewriting is needed (or wanted).
+
+Set `APP_URL` to the public `https://` URL — the application generates absolute
+links (admin assets, emails) from it.
+
+### Trusted proxies (required behind TLS)
+
+The admin UI builds absolute asset URLs from the request the PHP application
+sees. A TLS proxy terminates HTTPS and forwards plain HTTP, so without further
+configuration the application answers with `http://…` asset links on an
+`https://` page — the browser blocks them as mixed content and the admin UI
+fails to load.
+
+The proxy must announce the original request (`X-Forwarded-Proto: https` —
+Caddy, Traefik and nginx send it by default), and the application must be told
+to believe it, via `SYMFONY_TRUSTED_PROXIES` in `.env`:
+
+```dotenv
+# reverse proxy on 192.168.1.10, plus the Docker bridge networks of the host
+SYMFONY_TRUSTED_PROXIES=192.168.1.10,172.16.0.0/12
+# or, conveniently for home networks: trust all private subnets
+#SYMFONY_TRUSTED_PROXIES=private_ranges
+```
+
+- `docker-compose.yml` forwards `SYMFONY_TRUSTED_HEADERS` with a safe default
+  (`x-forwarded-for,x-forwarded-host,x-forwarded-port,x-forwarded-proto`);
+  set it only to change that list.
+- **Never set proxies without a header list**: an empty `SYMFONY_TRUSTED_HEADERS`
+  together with a non-empty `SYMFONY_TRUSTED_PROXIES` aborts the kernel boot
+  (`The trusted header "" is not supported.`). Leave both empty when nothing
+  proxies the stack.
+- Only the listed sources' X-Forwarded-* headers are trusted; direct requests
+  from other clients are unaffected.
+- Apply changes with `docker compose up -d` (the entrypoint clears the Symfony
+  cache on every boot) and hard-reload the browser afterwards — the old HTML
+  with `http://` asset links may still be cached.
 
 ## Repository layout
 
