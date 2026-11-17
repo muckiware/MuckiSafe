@@ -14,7 +14,6 @@
 #   - muckiware/facility-plugin      (MuckiFacilityPlugin)
 #   - muckiware/facility-menu-plugin (MuckiFacilityMenuPlugin)
 #   - muckiware/log-plugin           (MuckiLogPlugin)
-#   - frosh/mail-platform-archive    (FroshPlatformMailArchive)
 # Their versions are composer constraints (build args below). The default "*"
 # lets composer pick the newest stable release of each plugin that fits the
 # other plugins' requirements, so plugin releases never need a change here.
@@ -33,7 +32,6 @@ ARG MUCKIDRIVE_REF=main
 ARG FACILITY_PLUGIN_VERSION=*
 ARG FACILITY_MENU_PLUGIN_VERSION=*
 ARG LOG_PLUGIN_VERSION=*
-ARG MAIL_ARCHIVE_PLUGIN_VERSION=*
 ARG DEPLOYMENT_HELPER_VERSION=0.1.11
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -74,8 +72,7 @@ COPY muckidrive/custom/muckiware ./custom/muckiware
 RUN rm -rf custom/muckiware/restic \
         custom/plugins/MuckiFacilityPlugin \
         custom/plugins/MuckiFacilityMenuPlugin \
-        custom/plugins/MuckiLogPlugin \
-        custom/plugins/FroshPlatformMailArchive
+        custom/plugins/MuckiLogPlugin
 
 # muckidrive does not commit a composer.lock, so the composer step below must
 # re-resolve on every build. Docker cannot see that Packagist changed: without
@@ -93,7 +90,6 @@ RUN echo "composer resolve: ${CACHE_BUST}" \
         muckiware/facility-plugin:"${FACILITY_PLUGIN_VERSION}" \
         muckiware/facility-menu-plugin:"${FACILITY_MENU_PLUGIN_VERSION}" \
         muckiware/log-plugin:"${LOG_PLUGIN_VERSION}" \
-        frosh/mail-platform-archive:"${MAIL_ARCHIVE_PLUGIN_VERSION}" \
         shopware/deployment-helper:"${DEPLOYMENT_HELPER_VERSION}" \
         --no-interaction --no-scripts \
  && composer dump-autoload --optimize \
@@ -147,7 +143,7 @@ RUN sha256sum composer.lock | cut -d' ' -f1 > .image-fingerprint \
 # line). The CI workflow reads this file from the published image for the
 # release notes; "cat /var/www/html/.muckisafe-versions" shows it at runtime.
 RUN composer show --locked --format=json \
-    | jq -r '.locked[] | select(.name | test("^muckiware/|^frosh/mail-platform-archive$|^shopware/deployment-helper$")) | "\(.name) \(.version | ltrimstr("v"))"' \
+    | jq -r '.locked[] | select(.name | test("^muckiware/|^shopware/deployment-helper$")) | "\(.name) \(.version | ltrimstr("v"))"' \
     > .muckisafe-versions \
  && test -s .muckisafe-versions \
  && cat .muckisafe-versions

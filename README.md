@@ -15,15 +15,13 @@ What you get:
   (`muckiware:db:dump`, `muckiware:table:cleanup`, snapshot management)
 - **MuckiFacilityMenuPlugin** — administration menu for the facility features
 - **MuckiLogPlugin** — rotating log files, log levels, optional email alerts
-- **FroshPlatformMailArchive** ([frosh/mail-platform-archive](https://github.com/FriendsOfShopware/FroshPlatformMailArchive))
-  — archive of all sent emails in the administration, incl. resend
 - **Node.js 22** and **Composer 2.7.7** inside the container for console and build tasks
 - **MySQL 8.4** and a **Supercronic scheduler** for Shopware background jobs
 - Optional **SSH access** as `root`, secured exclusively with one or more public keys
 - First-boot installation: system + plugins + admin user are created automatically from
   environment variables — no SQL dump, no manual `system:install`
 
-Every release contains the newest mutually compatible releases of the four
+Every release contains the newest mutually compatible releases of the three
 plugins; the exact versions are listed in the
 [release notes](https://github.com/muckiware/MuckiSafe/releases) and in
 `/var/www/html/.muckisafe-versions` inside the container.
@@ -407,10 +405,9 @@ The build context is the MuckiSafe repository with the muckidrive platform clone
 into `./muckidrive` (the CI workflow does exactly this). The Dockerfile copies
 the platform skeleton from `muckidrive/`, then adds the Muckiware plugins at
 build time via `composer require` from Packagist (MuckiFacilityPlugin,
-MuckiFacilityMenuPlugin, MuckiLogPlugin, FroshPlatformMailArchive). Their
-versions are composer constraints passed as build args
-(`FACILITY_PLUGIN_VERSION`, `FACILITY_MENU_PLUGIN_VERSION`,
-`LOG_PLUGIN_VERSION`, `MAIL_ARCHIVE_PLUGIN_VERSION`); the default `*` makes
+MuckiFacilityMenuPlugin, MuckiLogPlugin). Their versions are composer
+constraints passed as build args (`FACILITY_PLUGIN_VERSION`,
+`FACILITY_MENU_PLUGIN_VERSION`, `LOG_PLUGIN_VERSION`); the default `*` makes
 composer pick the newest stable release of each plugin that is compatible with
 the others. Pass e.g. `--build-arg FACILITY_PLUGIN_VERSION=0.9.0` to pin one.
 The restic PHP client library comes from Packagist as a dependency of
@@ -453,14 +450,12 @@ plugin versions inside the image.
 
 Every build uses the latest release tag of muckidrive; only an explicit
 `muckidrive_ref` (platform release event or manual input) overrides it.
-`muckiware/core`, `muckiware/master` and the four plugins are resolved by
+`muckiware/core`, `muckiware/master` and the three plugins are resolved by
 composer at build time (muckidrive does not commit a `composer.lock`): each
 plugin gets its newest stable release that is compatible with the others. A
 plugin release pins only that plugin to the released version, so the build
 fails visibly if a sibling plugin does not accept it yet (release a compatible
 version of the sibling, then re-run the failed build).
-FroshPlatformMailArchive is a third-party plugin without a release event: a
-new release of it ends up in the next MuckiSafe release.
 
 ### Release events
 
