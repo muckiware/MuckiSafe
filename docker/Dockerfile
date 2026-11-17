@@ -14,6 +14,7 @@
 #   - muckiware/facility-plugin      (MuckiFacilityPlugin)
 #   - muckiware/facility-menu-plugin (MuckiFacilityMenuPlugin)
 #   - muckiware/log-plugin           (MuckiLogPlugin)
+#   - frosh/mail-platform-archive    (FroshPlatformMailArchive)
 # Their versions are composer constraints (build args below). The default "*"
 # lets composer pick the newest stable release of each plugin that fits the
 # other plugins' requirements, so plugin releases never need a change here.
@@ -32,6 +33,7 @@ ARG MUCKIDRIVE_REF=main
 ARG FACILITY_PLUGIN_VERSION=*
 ARG FACILITY_MENU_PLUGIN_VERSION=*
 ARG LOG_PLUGIN_VERSION=*
+ARG MAIL_ARCHIVE_PLUGIN_VERSION=*
 ARG DEPLOYMENT_HELPER_VERSION=0.1.11
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -72,7 +74,8 @@ COPY muckidrive/custom/muckiware ./custom/muckiware
 RUN rm -rf custom/muckiware/restic \
         custom/plugins/MuckiFacilityPlugin \
         custom/plugins/MuckiFacilityMenuPlugin \
-        custom/plugins/MuckiLogPlugin
+        custom/plugins/MuckiLogPlugin \
+        custom/plugins/FroshPlatformMailArchive
 
 # muckidrive does not commit a composer.lock, so the composer step below must
 # re-resolve on every build. Docker cannot see that Packagist changed: without
@@ -90,6 +93,7 @@ RUN echo "composer resolve: ${CACHE_BUST}" \
         muckiware/facility-plugin:"${FACILITY_PLUGIN_VERSION}" \
         muckiware/facility-menu-plugin:"${FACILITY_MENU_PLUGIN_VERSION}" \
         muckiware/log-plugin:"${LOG_PLUGIN_VERSION}" \
+        frosh/mail-platform-archive:"${MAIL_ARCHIVE_PLUGIN_VERSION}" \
         shopware/deployment-helper:"${DEPLOYMENT_HELPER_VERSION}" \
         --no-interaction --no-scripts \
  && composer dump-autoload --optimize \
@@ -143,7 +147,7 @@ RUN sha256sum composer.lock | cut -d' ' -f1 > .image-fingerprint \
 # line). The CI workflow reads this file from the published image for the
 # release notes; "cat /var/www/html/.muckisafe-versions" shows it at runtime.
 RUN composer show --locked --format=json \
-    | jq -r '.locked[] | select(.name | test("^muckiware/|^shopware/deployment-helper$")) | "\(.name) \(.version | ltrimstr("v"))"' \
+    | jq -r '.locked[] | select(.name | test("^muckiware/|^frosh/mail-platform-archive$|^shopware/deployment-helper$")) | "\(.name) \(.version | ltrimstr("v"))"' \
     > .muckisafe-versions \
  && test -s .muckisafe-versions \
  && cat .muckisafe-versions
@@ -169,9 +173,15 @@ ARG RESTIC_SHA256_ARM64=db27b803534d301cef30577468cf61cb2e242165b8cd6d8cd6efd700
 # Debian locks root by default. Give it a discarded random password hash so
 # OpenSSH permits public-key login; sshd_config still disables all password
 # and interactive authentication.
+#
+# mariadb-client: the facility plugin dumps databases (the own default
+# connection AND configured external database connections) through
+# spatie/db-dumper, which executes the `mysqldump` binary. Debian bookworm's
+# mariadb-client ships /usr/bin/mysqldump; mariadb-client-core does NOT
+# (only mariadb/mariadb-check/mysql names).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates openssl passwd netcat-openbsd util-linux tzdata openssh-server \
-        git unzip bzip2 \
+        git unzip bzip2 mariadb-client \
         libzip-dev libicu-dev libpng-dev libjpeg-dev libfreetype6-dev libsodium-dev \
     && ROOT_SSH_PASSWORD="$(openssl rand -base64 48)" \
     && ROOT_SSH_HASH="$(printf '%s' "$ROOT_SSH_PASSWORD" | openssl passwd -6 -stdin)" \

@@ -2,6 +2,29 @@
 # docker compose merges this file automatically into the base stack
 # (works as long as the stack is started without explicit -f files).
 # Override the host location via BACKUP_REPOS_PATH in .env.
+#
+# Optional: dump an external database that lives in another Compose stack
+# ("Backing up external databases" in the README). Create the network once
+# on the host (docker network create backup-net), attach it in the other
+# stack's compose file with a unique alias, then uncomment below.
+# Keep "default" listed — declaring networks: drops the implicit default
+# network, and DATABASE_URL (host "db") stops resolving.
+#
+#services:
+#  app:
+#    networks:
+#      - default
+#      - backup-net
+#  scheduler:
+#    networks:
+#      - default
+#      - backup-net
+#
+#networks:
+#  backup-net:
+#    name: backup-net
+#    external: true
+
 services:
   app:
     volumes:

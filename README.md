@@ -15,13 +15,15 @@ What you get:
   (`muckiware:db:dump`, `muckiware:table:cleanup`, snapshot management)
 - **MuckiFacilityMenuPlugin** — administration menu for the facility features
 - **MuckiLogPlugin** — rotating log files, log levels, optional email alerts
+- **FroshPlatformMailArchive** ([frosh/mail-platform-archive](https://github.com/FriendsOfShopware/FroshPlatformMailArchive))
+  — archive of all sent emails in the administration, incl. resend
 - **Node.js 22** and **Composer 2.7.7** inside the container for console and build tasks
 - **MySQL 8.4** and a **Supercronic scheduler** for Shopware background jobs
 - Optional **SSH access** as `root`, secured exclusively with one or more public keys
 - First-boot installation: system + plugins + admin user are created automatically from
   environment variables — no SQL dump, no manual `system:install`
 
-Every release contains the newest mutually compatible releases of the three
+Every release contains the newest mutually compatible releases of the four
 plugins; the exact versions are listed in the
 [release notes](https://github.com/muckiware/MuckiSafe/releases) and in
 `/var/www/html/.muckisafe-versions` inside the container.
@@ -254,6 +256,92 @@ Notes:
   docker compose -f docker-compose.yml -f docker-compose.ssh.yml -f docker-compose.override.yml up -d
   ```
 
+## Backing up external databases
+
+MuckiFacilityPlugin can dump not only MuckiSafe's own MySQL database but any
+external MySQL or MariaDB server reachable from the container — e.g. the
+MariaDB of another Compose stack on the same Docker host. Dumps run through
+`mysqldump` (Debian bookworm's `mariadb-client`, part of the image since the
+runtime stage installs it), which covers both server flavours: a MariaDB
+10.11 client dumps MariaDB (all current versions) and MySQL 8.x, including
+users with `caching_sha2_password`.
+
+For a database that lives in another Compose stack (typically without a
+published host port), wire it up in three steps:
+
+1. **Shared Docker network** — create it once on the host:
+
+   ```bash
+   docker network create backup-net
+   ```
+
+   Attach it on both sides. The database side gets a unique alias — never use
+   the service name `db`: both stacks alias their database `db`, and once a
+   container is on two networks that name resolves non-deterministically.
+
+   ```yaml
+   # in the OTHER stack's docker-compose.yml:
+   services:
+     db:
+       networks:
+         default: null
+         backup-net:
+           aliases:
+             - paperless-db   # unique alias, used as host in MuckiSafe
+
+   networks:
+     backup-net:
+       name: backup-net
+       external: true
+   ```
+
+   In MuckiSafe, extend the override from
+   [Backup repositories on the host](#backup-repositories-on-the-host) with the
+   same network — and keep `default` listed:
+
+   ```yaml
+   # in docker-compose.override.yml of MuckiSafe:
+   services:
+     app:
+       networks:
+         - default        # keep! otherwise the service loses its own network
+         - backup-net
+
+     scheduler:
+       networks:
+         - default
+         - backup-net
+
+   networks:
+     backup-net:
+       name: backup-net
+       external: true
+   ```
+
+   **`default` must stay listed.** As soon as a service declares `networks:`,
+   the implicit default network is dropped and `DATABASE_URL` (host `db`)
+   stops resolving. Both services need the new network: the connection test
+   runs in `app`, the dump itself runs in the `scheduler` messenger worker.
+
+2. **Dedicated dump user** in the external database — minimal grants, so the
+   application credentials never have to be stored in MuckiSafe:
+
+   ```sql
+   CREATE USER 'muckisafe_backup'@'%' IDENTIFIED BY '<password>';
+   GRANT SELECT, LOCK TABLES, SHOW VIEW, TRIGGER, EVENT ON <database>.* TO 'muckisafe_backup'@'%';
+   GRANT PROCESS ON *.* TO 'muckisafe_backup'@'%';
+   ```
+
+   `mysqldump --single-transaction` (set by the plugin) needs nothing beyond
+   that. A `%` host is fine as long as the database has no published host
+   port — the user is then only reachable from the Docker networks.
+
+3. **Database connection in the administration**: type `mysql`, host = the
+   alias from step 1 (e.g. `paperless-db`), port 3306, database name, and the
+   dump user with its password (stored encrypted via `MUWA_FACILITY_SECRET`).
+   Test the connection, then assign it to a backup repository with a database
+   backup type.
+
 ## Upgrades
 
 The container checks nothing automatically. To upgrade:
@@ -319,9 +407,10 @@ The build context is the MuckiSafe repository with the muckidrive platform clone
 into `./muckidrive` (the CI workflow does exactly this). The Dockerfile copies
 the platform skeleton from `muckidrive/`, then adds the Muckiware plugins at
 build time via `composer require` from Packagist (MuckiFacilityPlugin,
-MuckiFacilityMenuPlugin, MuckiLogPlugin). Their versions are composer
-constraints passed as build args (`FACILITY_PLUGIN_VERSION`,
-`FACILITY_MENU_PLUGIN_VERSION`, `LOG_PLUGIN_VERSION`); the default `*` makes
+MuckiFacilityMenuPlugin, MuckiLogPlugin, FroshPlatformMailArchive). Their
+versions are composer constraints passed as build args
+(`FACILITY_PLUGIN_VERSION`, `FACILITY_MENU_PLUGIN_VERSION`,
+`LOG_PLUGIN_VERSION`, `MAIL_ARCHIVE_PLUGIN_VERSION`); the default `*` makes
 composer pick the newest stable release of each plugin that is compatible with
 the others. Pass e.g. `--build-arg FACILITY_PLUGIN_VERSION=0.9.0` to pin one.
 The restic PHP client library comes from Packagist as a dependency of
@@ -364,12 +453,14 @@ plugin versions inside the image.
 
 Every build uses the latest release tag of muckidrive; only an explicit
 `muckidrive_ref` (platform release event or manual input) overrides it.
-`muckiware/core`, `muckiware/master` and the three plugins are resolved by
+`muckiware/core`, `muckiware/master` and the four plugins are resolved by
 composer at build time (muckidrive does not commit a `composer.lock`): each
 plugin gets its newest stable release that is compatible with the others. A
 plugin release pins only that plugin to the released version, so the build
 fails visibly if a sibling plugin does not accept it yet (release a compatible
 version of the sibling, then re-run the failed build).
+FroshPlatformMailArchive is a third-party plugin without a release event: a
+new release of it ends up in the next MuckiSafe release.
 
 ### Release events
 
