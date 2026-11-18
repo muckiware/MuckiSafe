@@ -1,0 +1,59 @@
+#!/bin/bash
+# =====================================================================
+# muckisafe-jellyfin-control — Host-Seite des Jellyfin-Stop/Start-Triggers
+#
+# Läuft als ROOT auf dem Host, gestartet von muckisafe-jellyfin.service
+# (path-Unit, sobald der MuckiSafe-Container die Trigger-Datei im
+# SCRIPTS_PATH-Bind-Mount anlegt).
+#
+# Liest die Aktion aus der Trigger-Datei (1. Wort: stop|start, 2. Wort:
+# Marker) und führt aus:
+#   stop : jellyfin-service.sh stop + setfacl -R -m u:33:rX auf die
+#          Jellyfin-Verzeichnisse (restic läuft im Container als UID 33)
+#   start: jellyfin-service.sh start (inkl. Warten auf HTTP-Bereitschaft)
+# Bestätigt über den Done-Marker, Fehler über die err-Datei.
+# =====================================================================
+set -uo pipefail
+
+PREP_DIR_HOST="${PREP_DIR_HOST:?Umgebung PREP_DIR_HOST fehlt (systemd-Service konfigurieren)}"
+JELLYFIN_SERVICE_BIN="${JELLYFIN_SERVICE_BIN:-/usr/local/sbin/jellyfin-service.sh}"
+JF_ACL_TARGETS="${JF_ACL_TARGETS:-/var/lib/jellyfin /etc/jellyfin}"   # Worttrennung gewollt
+
+RUN_FILE="$PREP_DIR_HOST/run"
+DONE_FILE="$PREP_DIR_HOST/done"
+ERR_FILE="$PREP_DIR_HOST/err"
+
+log(){ echo "[jellyfin-host] $*"; }
+fail(){
+    printf '%s\n' "$*" > "$ERR_FILE"
+    rm -f "$RUN_FILE"
+    log "ABGEBROCHEN (Fehlermeldung an Container übergeben)."
+    exit 1
+}
+
+[ -f "$RUN_FILE" ] || { log "Kein Trigger ($RUN_FILE) — nichts zu tun."; exit 0; }
+read -r ACTION MARKER < "$RUN_FILE" || true
+case "$ACTION" in
+  stop|start) ;;
+  *) fail "Unbekannte Aktion '$ACTION' im Trigger '$RUN_FILE'" ;;
+esac
+
+rm -f "$ERR_FILE" "$DONE_FILE"
+
+if [ "$ACTION" = "stop" ]; then
+    log "Trigger 'stop' ($MARKER) — Jellyfin stoppen..."
+    "$JELLYFIN_SERVICE_BIN" stop || fail "jellyfin-service.sh stop fehlgeschlagen (journalctl -u jellyfin)"
+    log "Jellyfin gestoppt — Lese-ACLs (u:33:rX) setzen auf: $JF_ACL_TARGETS"
+    # shellcheck disable=SC2086 — mehrere Pfade, Worttrennung gewollt
+    setfacl -R -m u:33:rX $JF_ACL_TARGETS || fail "setfacl fehlgeschlagen (acl-Paket installiert? Pfade: $JF_ACL_TARGETS)"
+    log "Lese-ACLs gesetzt — restic (UID 33) kann die Jellyfin-Daten lesen."
+else
+    log "Trigger 'start' ($MARKER) — Jellyfin starten..."
+    "$JELLYFIN_SERVICE_BIN" start || fail "jellyfin-service.sh start fehlgeschlagen (journalctl -u jellyfin)"
+    log "Jellyfin läuft wieder (HTTP-Bereitschaft verifiziert)."
+fi
+
+printf '%s\n' "$MARKER" > "$DONE_FILE"
+rm -f "$RUN_FILE"
+log "Fertig — Done-Marker '$MARKER' gesetzt, Trigger entfernt."
+exit 0

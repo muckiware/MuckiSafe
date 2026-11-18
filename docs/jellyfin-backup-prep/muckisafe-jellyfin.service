@@ -1,0 +1,17 @@
+# Führt Jellyfin Stop/Start für das MuckiSafe-Backup aus:
+#   stop  = Jellyfin anhalten + Lese-ACLs (u:33:rX) für restic
+#   start = Jellyfin starten + auf HTTP-Bereitschaft warten
+# (Die Aktion steht in der Trigger-Datei, nicht hier.)
+# Installieren nach /etc/systemd/system/ und dabei @STACK_SCRIPTS@ durch den
+# ABSOLUTEN Host-Pfad des scripts-Ordners ersetzen (siehe ANLEITUNG.md).
+[Unit]
+Description=Jellyfin Stop/Start für MuckiSafe-Backup (stop+ACLs vor, start nach dem Backup)
+
+[Service]
+Type=oneshot
+# stop + setfacl über den Metadaten-Baum und start (inkl. HTTP-Wartezeit) — großzügig.
+TimeoutStartSec=15min
+Environment=PREP_DIR_HOST=@STACK_SCRIPTS@/.jellyfin
+Environment=JELLYFIN_SERVICE_BIN=/usr/local/sbin/jellyfin-service.sh
+Environment="JF_ACL_TARGETS=/var/lib/jellyfin /etc/jellyfin"
+ExecStart=/usr/local/bin/muckisafe-jellyfin-control

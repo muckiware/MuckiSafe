@@ -1,0 +1,12 @@
+# Überwacht den Trigger des MuckiSafe-Containers für Jellyfin Stop/Start.
+# Installieren nach /etc/systemd/system/ und dabei @STACK_SCRIPTS@ durch den
+# ABSOLUTEN Host-Pfad des scripts-Ordners ersetzen (siehe ANLEITUNG.md).
+[Unit]
+Description=MuckiSafe-Trigger für Jellyfin Stop/Start (Flag-Datei)
+
+[Path]
+PathExists=@STACK_SCRIPTS@/.jellyfin/run
+Unit=muckisafe-jellyfin.service
+
+[Install]
+WantedBy=multi-user.target
