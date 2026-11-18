@@ -1,0 +1,12 @@
+# Überwacht den Trigger des MuckiSafe-Containers für die Bitwarden-Backup-Vorbereitung.
+# Installieren nach /etc/systemd/system/ und dabei @STACK_SCRIPTS@ durch den
+# ABSOLUTEN Host-Pfad des scripts-Ordners ersetzen (siehe ANLEITUNG.md).
+[Unit]
+Description=MuckiSafe-Trigger für Bitwarden-Backup-Vorbereitung (Flag-Datei)
+
+[Path]
+PathExists=@STACK_SCRIPTS@/.prep/run
+Unit=muckisafe-bitwarden-prep.service
+
+[Install]
+WantedBy=multi-user.target

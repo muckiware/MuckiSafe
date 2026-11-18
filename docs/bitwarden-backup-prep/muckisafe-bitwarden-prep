@@ -1,0 +1,48 @@
+#!/bin/bash
+# =====================================================================
+# muckisafe-bitwarden-prep — Host-Seite der Bitwarden-Backup-Vorbereitung
+#
+# Läuft als ROOT auf dem Host, gestartet von muckisafe-bitwarden-prep.service
+# (getriggert über die path-Unit, sobald der MuckiSafe-Container die
+# Trigger-Datei im SCRIPTS_PATH-Bind-Mount anlegt).
+#
+# Macht genau zwei Dinge:
+#   1. docker exec -i <mssql-container> /backup-db.sh   → frische .BAK
+#   2. setfacl -R -m u:33:rX /opt/bitwarden             → Lese-Rechte für www-data
+# =====================================================================
+set -uo pipefail
+
+PREP_DIR_HOST="${PREP_DIR_HOST:?Umgebung PREP_DIR_HOST fehlt (systemd-Service konfigurieren)}"
+MSSQL_CONTAINER="${MSSQL_CONTAINER:-bitwarden-mssql}"
+BW_DATA_HOST="${BW_DATA_HOST:-/opt/bitwarden}"
+
+RUN_FILE="$PREP_DIR_HOST/run"
+DONE_FILE="$PREP_DIR_HOST/done"
+ERR_FILE="$PREP_DIR_HOST/err"
+
+log(){ echo "[bitwarden-prep-host] $*"; }
+
+[ -f "$RUN_FILE" ] || { log "Kein Trigger ($RUN_FILE) — nichts zu tun."; exit 0; }
+MARKER="$(tail -n 1 "$RUN_FILE" 2>/dev/null || true)"
+
+rm -f "$ERR_FILE" "$DONE_FILE"
+
+log "Trigger erhalten ('$MARKER') — frische MSSQL-Vollsicherung starten ($MSSQL_CONTAINER)..."
+if ! docker exec -i "$MSSQL_CONTAINER" /backup-db.sh; then
+    printf 'docker exec %s /backup-db.sh fehlgeschlagen — läuft der Container?\n' "$MSSQL_CONTAINER" > "$ERR_FILE"
+    rm -f "$RUN_FILE"
+    log "ABGEBROCHEN (Fehlermeldung an Container übergeben)."
+    exit 1
+fi
+log "Frische .BAK erstellt — Lese-ACLs (u:33:rX) auf $BW_DATA_HOST setzen..."
+if ! setfacl -R -m u:33:rX "$BW_DATA_HOST"; then
+    printf 'setfacl -R -m u:33:rX %s fehlgeschlagen (acl-Paket installiert?)\n' "$BW_DATA_HOST" > "$ERR_FILE"
+    rm -f "$RUN_FILE"
+    log "ABGEBROCHEN (Fehlermeldung an Container übergeben)."
+    exit 1
+fi
+
+printf '%s\n' "$MARKER" > "$DONE_FILE"
+rm -f "$RUN_FILE"
+log "Fertig — Done-Marker '$MARKER' gesetzt, Trigger entfernt."
+exit 0

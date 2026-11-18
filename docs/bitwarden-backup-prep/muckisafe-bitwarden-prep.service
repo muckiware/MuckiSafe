@@ -1,0 +1,15 @@
+# Führt die Bitwarden-Backup-Vorbereitung aus: frische MSSQL-Vollsicherung
+# (.BAK) + Lese-ACLs für UID 33 auf den Bitwarden-Daten.
+# Installieren nach /etc/systemd/system/ und dabei @STACK_SCRIPTS@ durch den
+# ABSOLUTEN Host-Pfad des scripts-Ordners ersetzen (siehe ANLEITUNG.md).
+[Unit]
+Description=Bitwarden-Backup-Vorbereitung (frische .BAK + Lese-ACLs u:33)
+
+[Service]
+Type=oneshot
+# Das MSSQL-Backup großer Vaults kann Minuten dauern — nicht abwürgen.
+TimeoutStartSec=30min
+Environment=PREP_DIR_HOST=@STACK_SCRIPTS@/.prep
+Environment=MSSQL_CONTAINER=bitwarden-mssql
+Environment=BW_DATA_HOST=/opt/bitwarden
+ExecStart=/usr/local/bin/muckisafe-bitwarden-prep
