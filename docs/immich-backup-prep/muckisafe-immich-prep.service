@@ -1,0 +1,22 @@
+# Führt die Immich-Backup-Vorbereitung aus: frischer Postgres-Dump
+# (UPLOAD_LOCATION/backups) + Lese-ACLs (u:33:rX) auf die Immich-Datenpfade.
+# Installieren nach /etc/systemd/system/ und dabei BEIDE Platzhalter ersetzen
+# (siehe ANLEITUNG.md):
+#   @STACK_SCRIPTS@    = absoluter Host-Pfad des MuckiSafe-scripts-Ordners
+#   @IMMICH_STACK_DIR@ = Compose-Verzeichnis des Immich-Stacks (enthält .env)
+[Unit]
+Description=Immich-Backup-Vorbereitung (frischer DB-Dump + Lese-ACLs u:33)
+
+[Service]
+Type=oneshot
+# pg_dump großer Bibliotheken + setfacl über den Medien-Baum kann dauern.
+TimeoutStartSec=30min
+Environment=PREP_DIR_HOST=@STACK_SCRIPTS@/.immich
+Environment=IMMICH_ENV_FILE=@IMMICH_STACK_DIR@/.env
+Environment=DB_CONTAINER=immich_postgres
+# Overrides nur falls nötig (sonst gilt die Immich-.env):
+# Environment=IMMICH_UPLOAD_HOST=/pfad/zum/upload
+# Environment=DB_USERNAME=postgres
+# Environment=DB_DATABASE_NAME=immich
+# Environment=DUMP_KEEP=10
+ExecStart=/usr/local/bin/muckisafe-immich-prep

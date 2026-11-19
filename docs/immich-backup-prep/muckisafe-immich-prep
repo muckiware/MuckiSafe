@@ -1,0 +1,142 @@
+#!/bin/bash
+# =====================================================================
+# muckisafe-immich-prep — Host-Seite der Immich-Backup-Vorbereitung
+#
+# Läuft als ROOT auf dem Host, gestartet von muckisafe-immich-prep.service
+# (getriggert über die path-Unit, sobald der MuckiSafe-Container die
+# Trigger-Datei im SCRIPTS_PATH-Bind-Mount anlegt).
+#
+# Macht genau zwei Dinge:
+#   1. Frischer Postgres-Dump — online konsistent (MVCC), kein Stop des
+#      Immich-Stacks nötig:
+#        docker exec -t immich_postgres pg_dump --clean --if-exists \
+#          --dbname=<DB> --username=<user> | gzip
+#      → <UPLOAD_LOCATION>/backups/immich-db-dump-manual-<ts>.sql.gz
+#      Immich legt seine eigenen Auto-Backups in denselben Ordner — die
+#      Restore-UI (Administration > Maintenance) findet beide. Der Dump
+#      wird unter .part geschrieben und erst bei Erfolg umbenannt, damit
+#      nie ein halber Dump in der Backup-Quelle liegt.
+#   2. setfacl -R -m u:33:rX auf die Immich-Datenpfade (restic läuft im
+#      MuckiSafe-Container als www-data/UID 33): Upload-Baum plus die
+#      separaten Pfade thumbs/encoded-video/profile, falls die .env sie
+#      auf eigene Pfade außerhalb zeigt.
+#
+# Konfiguration: Pfade und DB-Zugang werden aus der .env des Immich-
+# Compose-Stacks gelesen (IMMICH_ENV_FILE, von der systemd-Unit gesetzt).
+# Alle Werte lassen sich per Umgebungsvariable übersteuern (nützlich ohne
+# .env): IMMICH_UPLOAD_HOST, DB_USERNAME, DB_DATABASE_NAME, DB_CONTAINER;
+# zusätzlich: IMMICH_ACL_EXTRA (weitere ACL-Pfade, Wortliste),
+# DUMP_KEEP (wie viele eigene Dumps behalten werden, Default 10).
+# =====================================================================
+set -uo pipefail
+
+PREP_DIR_HOST="${PREP_DIR_HOST:?Umgebung PREP_DIR_HOST fehlt (systemd-Service konfigurieren)}"
+DB_CONTAINER="${DB_CONTAINER:-immich_postgres}"
+IMMICH_ENV_FILE="${IMMICH_ENV_FILE:-}"
+IMMICH_UPLOAD_HOST="${IMMICH_UPLOAD_HOST:-}"
+IMMICH_ACL_EXTRA="${IMMICH_ACL_EXTRA:-}"
+DUMP_KEEP="${DUMP_KEEP:-10}"
+
+RUN_FILE="$PREP_DIR_HOST/run"
+DONE_FILE="$PREP_DIR_HOST/done"
+ERR_FILE="$PREP_DIR_HOST/err"
+
+log(){ echo "[immich-prep-host] $*"; }
+fail(){
+    printf '%s\n' "$*" > "$ERR_FILE"
+    rm -f "$RUN_FILE"
+    log "ABGEBROCHEN (Fehlermeldung an Container übergeben)."
+    exit 1
+}
+
+[ -f "$RUN_FILE" ] || { log "Kein Trigger ($RUN_FILE) — nichts zu tun."; exit 0; }
+MARKER="$(tail -n 1 "$RUN_FILE" 2>/dev/null || true)"
+
+# --- Werte aus der Immich-.env (Env-Variablen haben Vorrang) -----------
+env_value(){ # $1 = KEY — leer, wenn .env fehlt
+    grep -E "^$1=" "$IMMICH_ENV_FILE" 2>/dev/null | head -n 1 | cut -d= -f2- | sed -e "s/^['\"]//" -e "s/['\"]$//"
+}
+
+IMMICH_UPLOAD_HOST="${IMMICH_UPLOAD_HOST:-$(env_value UPLOAD_LOCATION)}"
+THUMB_HOST="$(env_value THUMB_LOCATION)"
+ENCODED_HOST="$(env_value ENCODED_VIDEO_LOCATION)"
+PROFILE_HOST="$(env_value PROFILE_LOCATION)"
+DB_USERNAME="${DB_USERNAME:-$(env_value DB_USERNAME)}"
+DB_USERNAME="${DB_USERNAME:-postgres}"
+DB_DATABASE_NAME="${DB_DATABASE_NAME:-$(env_value DB_DATABASE_NAME)}"
+DB_DATABASE_NAME="${DB_DATABASE_NAME:-immich}"
+
+case "$DUMP_KEEP" in
+    ''|*[!0-9]*|0) fail "DUMP_KEEP muss eine Zahl >= 1 sein (ist: '$DUMP_KEEP')" ;;
+esac
+
+[ -n "$IMMICH_UPLOAD_HOST" ] || fail "UPLOAD_LOCATION unbekannt — IMMICH_ENV_FILE in der systemd-Unit auf die Immich-.env setzen (oder IMMICH_UPLOAD_HOST als Override)"
+[ -d "$IMMICH_UPLOAD_HOST" ] || fail "UPLOAD_LOCATION existiert nicht: $IMMICH_UPLOAD_HOST (.env-Pfad geändert?)"
+
+# --- ACL-Ziele: Upload-Baum + separate Derivat-Pfade, sofern vorhanden ---
+# Pfade innerhalb des Upload-Baums sind durch das rekursive setfacl darauf
+# automatisch abgedeckt und werden nicht doppelt aufgenommen.
+ACL_TARGETS=("$IMMICH_UPLOAD_HOST")
+add_target(){
+    local p="$1"
+    [ -n "$p" ] || return 0
+    if [ ! -d "$p" ]; then
+        log "WARNUNG: Pfad aus der .env existiert nicht, wird übersprungen: $p"
+        return 0
+    fi
+    case "$p" in
+        "$IMMICH_UPLOAD_HOST"|"$IMMICH_UPLOAD_HOST"/*) return 0 ;;
+    esac
+    ACL_TARGETS+=("$p")
+}
+add_target "$THUMB_HOST"
+add_target "$ENCODED_HOST"
+add_target "$PROFILE_HOST"
+# shellcheck disable=SC2206 — Wortliste gewollt (Pfade ohne Leerzeichen)
+for p in $IMMICH_ACL_EXTRA; do add_target "$p"; done
+
+rm -f "$ERR_FILE" "$DONE_FILE"
+
+# --- 1) Frischer Postgres-Dump in den Immich-Backups-Ordner -------------
+BACKUP_DIR="$IMMICH_UPLOAD_HOST/backups"
+mkdir -p "$BACKUP_DIR" || fail "Kann $BACKUP_DIR nicht anlegen (Rechte?)"
+DUMP_FILE="$BACKUP_DIR/immich-db-dump-manual-$(date +%Y%m%d-%H%M%S).sql.gz"
+DUMP_TMP="$DUMP_FILE.part"
+
+log "Trigger erhalten ('$MARKER') — frischen Postgres-Dump ziehen ($DB_CONTAINER, DB '$DB_DATABASE_NAME')..."
+rm -f "$DUMP_TMP"
+if ! docker exec -t "$DB_CONTAINER" pg_dump --clean --if-exists \
+        --dbname="$DB_DATABASE_NAME" --username="$DB_USERNAME" | gzip > "$DUMP_TMP"; then
+    rm -f "$DUMP_TMP"
+    fail "pg_dump über $DB_CONTAINER fehlgeschlagen — läuft der Container? (docker logs $DB_CONTAINER)"
+fi
+if [ ! -s "$DUMP_TMP" ]; then
+    rm -f "$DUMP_TMP"
+    fail "pg_dump lieferte eine leere Datei — DB-Name/User korrekt? ('$DB_DATABASE_NAME'/'$DB_USERNAME')"
+fi
+mv "$DUMP_TMP" "$DUMP_FILE"
+log "Frischer Dump erstellt: $DUMP_FILE"
+
+# --- Eigene Dumps auf die letzten DUMP_KEEP begrenzen --------------------
+# Betrifft NUR das eigene Namensmuster — Immichs Auto-Backups verwaltet
+# Immich selbst (Administration > Settings > Database Dump Settings).
+log "Räume ältere eigene Dumps auf (behalte die letzten $DUMP_KEEP)..."
+# shellcheck disable=SC2012 — Datum steckt im Dateinamen, ls -t ist korrekt
+ls -1t "$BACKUP_DIR"/immich-db-dump-manual-*.sql.gz 2>/dev/null | tail -n +"$((DUMP_KEEP + 1))" | while IFS= read -r f; do
+    rm -f -- "$f"
+done
+
+# --- 2) Lese-ACLs für den Backup-User (UID 33) ---------------------------
+log "Lese-ACLs (u:33:rX) setzen auf: ${ACL_TARGETS[*]}"
+setfacl -R -m u:33:rX "${ACL_TARGETS[@]}" \
+    || fail "setfacl fehlgeschlagen (acl-Paket installiert? Pfade: ${ACL_TARGETS[*]})"
+
+# --- Bestätigung: Marker, Dump-Pfad und Quellpfade an den Container ------
+{
+    printf '%s\n' "$MARKER"
+    printf '%s\n' "$DUMP_FILE"
+    printf '%s\n' "${ACL_TARGETS[@]}"
+} > "$DONE_FILE"
+rm -f "$RUN_FILE"
+log "Fertig — Done-Marker '$MARKER' gesetzt, Trigger entfernt."
+exit 0

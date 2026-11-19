@@ -1,0 +1,12 @@
+# Überwacht den Trigger des MuckiSafe-Containers für die Immich-Backup-Vorbereitung.
+# Installieren nach /etc/systemd/system/ und dabei @STACK_SCRIPTS@ durch den
+# ABSOLUTEN Host-Pfad des scripts-Ordners ersetzen (siehe ANLEITUNG.md).
+[Unit]
+Description=MuckiSafe-Trigger für Immich-Backup-Vorbereitung (Flag-Datei)
+
+[Path]
+PathExists=@STACK_SCRIPTS@/.immich/run
+Unit=muckisafe-immich-prep.service
+
+[Install]
+WantedBy=multi-user.target
