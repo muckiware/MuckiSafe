@@ -162,9 +162,9 @@ ARG SUPERCRONIC_SHA256_ARM64=4ae22576a78223d8ccdf5f3b3660a5cbb5288416bf0ca96afc4
 # restic 0.14.0, which ignores --json on `restic init`; muckiware/restic needs
 # >= 0.15. When changing RESTIC_VERSION, update both checksums from the
 # release's SHA256SUMS file (restic_<version>_linux_<arch>.bz2).
-ARG RESTIC_VERSION=0.17.3
-ARG RESTIC_SHA256_AMD64=5097faeda6aa13167aae6e36efdba636637f8741fed89bbf015678334632d4d3
-ARG RESTIC_SHA256_ARM64=db27b803534d301cef30577468cf61cb2e242165b8cd6d8cd6efd7001be2e557
+ARG RESTIC_VERSION=0.18.1
+ARG RESTIC_SHA256_AMD64=680838f19d67151adba227e1570cdd8af12c19cf1735783ed1ba928bc41f363d
+ARG RESTIC_SHA256_ARM64=87f53fddde38764095e9c058a3b31834052c37e5826d2acf34e18923c006bd45
 
 # Debian locks root by default. Give it a discarded random password hash so
 # OpenSSH permits public-key login; sshd_config still disables all password
@@ -195,7 +195,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && chmod +x /usr/local/bin/supercronic \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /etc/ssh/ssh_host_* \
-    && a2enmod rewrite headers
+    && a2enmod rewrite headers \
+    && mysqldump --version
 
 # Pinned restic release binary, installed to the path the Debian package used.
 RUN case "${TARGETARCH}" in \

@@ -414,7 +414,7 @@ The restic PHP client library comes from Packagist as a dependency of
 MuckiFacilityPlugin. The resolved versions are written to
 `/var/www/html/.muckisafe-versions`. The restic binary itself comes from the official restic
 GitHub release, not from Debian (bookworm only ships 0.14.0, which is too old
-for the plugin): the version is the build arg `RESTIC_VERSION` (default 0.17.3)
+for the plugin): the version is the build arg `RESTIC_VERSION` (default 0.18.1)
 together with `RESTIC_SHA256_AMD64` / `RESTIC_SHA256_ARM64`, which must match
 the release's `SHA256SUMS`. The plugins are
 installed, activated and updated on every container start by
