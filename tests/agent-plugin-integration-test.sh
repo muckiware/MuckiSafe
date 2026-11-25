@@ -194,6 +194,31 @@ check_documentation() {
         'install -d -o root -g 33 -m 0770 /var/lib/mucki-agent/wakeup'; do
         assert_contains README.md "$text"
     done
+    assert_contains README.md 'docs/host-agent/README.md'
+    check_host_agent_documentation
+}
+
+# The host installation guide: release download with checksum, systemd,
+# root-owned files, HTTPS by default, the global wakeup path, no Go on the
+# host and the release dispatch.
+check_host_agent_documentation() {
+    local doc=docs/host-agent/README.md
+    for text in \
+        'https://github.com/muckiware/MuckiSafeAgentPlugin/releases' \
+        'agent-vX.Y.Z' \
+        'mucki-agent-X.Y.Z-linux.tar.gz.sha256' \
+        'sha256sum --check --strict' \
+        'install.sh' 'uninstall.sh' \
+        'systemctl status mucki-agent' 'journalctl -u mucki-agent' \
+        '/etc/mucki-agent/config.yaml' '/etc/mucki-agent/secret' '/etc/mucki-agent/policy.yaml' \
+        '/var/lib/mucki-agent/state' 'root:root' '0600' \
+        'allowInsecureHttp: true' 'https://' \
+        '/var/lib/mucki-agent/wakeup' '/var/run/mucki-agent/wakeup' MUCKI_AGENT_WAKEUP_PATH \
+        'mucki-agent config validate' \
+        'No Go toolchain' \
+        "$EVENT"; do
+        assert_contains "$doc" "$text"
+    done
 }
 
 # --- built image ------------------------------------------------------------
