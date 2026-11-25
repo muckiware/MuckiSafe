@@ -50,6 +50,10 @@ services:
       # Generate:  openssl rand -hex 32
       # Without this value encrypted repository passwords cannot be read back!
       MUWA_FACILITY_SECRET: ${MUWA_FACILITY_SECRET}
+      # MuckiSafeAgentPlugin: versioned keyring that encrypts the host agent
+      # secrets; must be identical in app and scheduler. Empty = no agent can
+      # be provisioned. See README "Host agent".
+      MUWA_AGENT_ENCRYPTION_KEYRING: ${MUWA_AGENT_ENCRYPTION_KEYRING:-}
       # First-boot admin account (created only on initial installation)
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
@@ -67,6 +71,11 @@ services:
       - app-media:/var/www/html/public/media
       # Persist server host keys so SSH identity survives container recreation.
       - ssh-host-keys:/var/lib/muckisafe-ssh
+      # Global wakeup directory of the MuckiSafe host agent (README "Host
+      # agent"). Create it on the host before the first start as root:33, 0770;
+      # Docker would otherwise create it as root:root and www-data could not
+      # write wakeups (the agent still finds every job by polling).
+      - ${MUCKI_AGENT_WAKEUP_PATH:-/var/lib/mucki-agent/wakeup}:/var/run/mucki-agent/wakeup
     depends_on:
       db:
         condition: service_healthy
@@ -96,6 +105,7 @@ services:
       DATABASE_URL: mysql://${DB_USER:-muckisafe}:${DB_PASSWORD}@db:3306/${DB_NAME:-muckisafe}
       MUCKIWARE_ROOT: /var/www/html
       MUWA_FACILITY_SECRET: ${MUWA_FACILITY_SECRET}
+      MUWA_AGENT_ENCRYPTION_KEYRING: ${MUWA_AGENT_ENCRYPTION_KEYRING:-}
       MAILER_DSN: ${MAILER_DSN:-null://null}
       # Five-field cron expressions. Defaults: every five minutes.
       MESSENGER_CRON: "${MESSENGER_CRON:-*/5 * * * *}"
@@ -105,6 +115,8 @@ services:
       - app-var:/var/www/html/var
       - app-files:/var/www/html/files
       - app-media:/var/www/html/public/media
+      # Scheduled backups run here and wake the host agent as well.
+      - ${MUCKI_AGENT_WAKEUP_PATH:-/var/lib/mucki-agent/wakeup}:/var/run/mucki-agent/wakeup
     depends_on:
       app:
         condition: service_healthy

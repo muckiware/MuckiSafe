@@ -67,6 +67,8 @@ Then open **http://localhost:8080/admin** and log in with `ADMIN_USERNAME` /
 | `SSH_PUBLIC_KEYS` | – | SSH public key **content** — one bare key per line, no file paths; empty disables SSH (see [SSH access](#ssh-access)) |
 | `SSH_PORT` | – | Host port for SSH (default `2222`) |
 | `BACKUP_REPOS_PATH` | – | Host directory for backup repositories — only used together with the [override](#backup-repositories-on-the-host) from `docker-compose.override.yml` (default `./backup-repos`) |
+| `MUWA_AGENT_ENCRYPTION_KEYRING` | – | Versioned keyring that encrypts the [host agent](#host-agent) secrets; required to provision agents — **keep it as safe as `MUWA_FACILITY_SECRET`** |
+| `MUCKI_AGENT_WAKEUP_PATH` | – | Host directory for [host agent](#host-agent) wakeup files, mounted into `app` and `scheduler` (default `/var/lib/mucki-agent/wakeup`) |
 
 ## SSH access
 
@@ -343,6 +345,73 @@ published host port), wire it up in three steps:
    dump user with its password (stored encrypted via `MUWA_FACILITY_SECRET`).
    Test the connection, then assign it to a backup repository with a database
    backup type.
+
+## Host agent
+
+MuckiSafeAgentPlugin (`muckiware/mucki-safe-agent-plugin`) is the control
+plane of the MuckiSafe host agent: a separate Linux binary with systemd unit,
+released on its own, that runs the declarative pre/post/finally actions of a
+backup (stop a service, dump a database, …) on the Docker host. The image
+contains neither the agent nor a Go toolchain. Two settings connect the stack
+to it; without them everything else works unchanged.
+
+**Encryption keyring.** Agent secrets are stored encrypted with
+`MUWA_AGENT_ENCRYPTION_KEYRING`, which `app` and `scheduler` both receive
+unchanged. Generate a keyring with one key and put the printed line into `.env`
+(the single quotes are required):
+
+```bash
+printf "MUWA_AGENT_ENCRYPTION_KEYRING='{\"active\":1,\"keys\":{\"1\":\"%s\"}}'\n" "$(openssl rand -hex 32)"
+docker compose up -d
+```
+
+Every key is 64 hex characters (32 bytes). Without the keyring, provisioning
+an agent in the administration fails with *keyring missing or invalid*. A lost
+keyring makes all stored agent secrets unreadable: revoke the agents and
+provision them again with a new keyring.
+
+To change the key, add a new version and make it active
+(`{"active":2,"keys":{"1":"…","2":"…"}}`) and recreate the stack. Then
+re-encrypt the secrets stored under the old version with
+`POST /api/_action/muwa/agent/master-key/reencrypt` and the body
+`{"fromVersion":1}` (optional `"batchSize"`, 1–1000, default 100; ACL
+`muwa_agent.master_key_reencrypt`). The route works in batches: **repeat it
+until the response contains `"removalAllowed": true`** — only then remove
+version 1 from the keyring. Removing it earlier makes the remaining agent
+secrets unreadable.
+
+**Wakeup directory.** Right after it queues a job, the plugin drops a
+`<job-id>.ready` file into `/var/run/mucki-agent/wakeup`, so the agent claims
+the job immediately instead of at its next poll. Both `app` (backups started in
+the administration) and `scheduler` (scheduled backups) bind-mount the same
+host directory `MUCKI_AGENT_WAKEUP_PATH` (default
+`/var/lib/mucki-agent/wakeup`) there and write as `www-data` (UID/GID 33).
+Create it on the Linux host **before** starting the stack — Compose does not
+set owner or mode, and a directory Docker creates on its own belongs to
+`root:root`, so the containers could not write to it:
+
+```bash
+sudo install -d -o root -g 33 -m 0770 /var/lib/mucki-agent/wakeup
+docker compose up -d
+```
+
+The command is idempotent and also repairs owner and mode of an existing
+directory; the agent's `install.sh` runs the same step for the default path
+(with a custom path, pass the containers via `install.sh --container NAME` so
+it can check their `www-data` GID). Verify that both
+services can write:
+
+```bash
+docker compose exec -u www-data app touch /var/run/mucki-agent/wakeup/probe && \
+docker compose exec scheduler rm /var/run/mucki-agent/wakeup/probe && echo writable
+```
+
+Wakeups are only hints: polling stays authoritative, so a missing or
+read-only directory delays jobs until the next poll but loses none, and the
+plugin logs a warning. With a custom `MUCKI_AGENT_WAKEUP_PATH` use that path in
+the `install -d` command and as `wakeupDirectory` in the agent configuration.
+The agent runs on Linux only; on Docker Desktop (macOS/Windows) the default
+path is created inside the Docker VM, which is harmless.
 
 ## Upgrades
 
