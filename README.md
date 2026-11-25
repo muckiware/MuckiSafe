@@ -355,6 +355,12 @@ backup (stop a service, dump a database, …) on the Docker host. The image
 contains neither the agent nor a Go toolchain. Two settings connect the stack
 to it; without them everything else works unchanged.
 
+**Installing the agent on the host** — download of the `agent-vX.Y.Z` GitHub
+release with SHA-256 check, `install.sh`, systemd, root-owned
+config/secret/state, HTTPS by default and explicit HTTP, updates and removal:
+see [docs/host-agent/README.md](docs/host-agent/README.md). Neither Go nor a
+build step is needed on the host.
+
 **Encryption keyring.** Agent secrets are stored encrypted with
 `MUWA_AGENT_ENCRYPTION_KEYRING`, which `app` and `scheduler` both receive
 unchanged. Generate a keyring with one key and put the printed line into `.env`
@@ -623,6 +629,7 @@ docker/entrypoint.sh    First-boot installation, image updates, plugins + Apache
 docker/db-probe.php     Database inspection for the entrypoint (no kernel boot)
 .dockerignore           Build context filter
 .github/workflows/      Image build & publish to GHCR
+docs/host-agent/        Installation of the separate MuckiSafe host agent on the Docker host
 ```
 
 The application code itself lives in [muckiware/muckidrive](https://github.com/muckiware/muckidrive)
