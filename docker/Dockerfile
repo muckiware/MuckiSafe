@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 #
 # MuckiSafe image — the muckidrive platform (Shopware 6.7 core framework,
-# no shop context) combined with the Muckiware facility and logging plugins
-# into a ready-to-run backup server.
+# no shop context) combined with the Muckiware facility, logging and agent
+# plugins into a ready-to-run backup server.
 #
 # Build context = this (MuckiSafe) repository root with the muckidrive
 # platform cloned into the ./muckidrive subdirectory. The CI workflow does
@@ -14,6 +14,9 @@
 #   - muckiware/facility-plugin      (MuckiFacilityPlugin)
 #   - muckiware/facility-menu-plugin (MuckiFacilityMenuPlugin)
 #   - muckiware/log-plugin           (MuckiLogPlugin)
+#   - muckiware/mucki-safe-agent-plugin (MuckiSafeAgentPlugin): control plane
+#     of the MuckiSafe host agent. Only the PHP plugin is installed; the Go
+#     agent is released separately and runs on the host, never in the image.
 # Their versions are composer constraints (build args below). The default "*"
 # lets composer pick the newest stable release of each plugin that fits the
 # other plugins' requirements, so plugin releases never need a change here.
@@ -32,6 +35,7 @@ ARG MUCKIDRIVE_REF=main
 ARG FACILITY_PLUGIN_VERSION=*
 ARG FACILITY_MENU_PLUGIN_VERSION=*
 ARG LOG_PLUGIN_VERSION=*
+ARG AGENT_PLUGIN_VERSION=*
 ARG DEPLOYMENT_HELPER_VERSION=0.1.11
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -72,7 +76,8 @@ COPY muckidrive/custom/muckiware ./custom/muckiware
 RUN rm -rf custom/muckiware/restic \
         custom/plugins/MuckiFacilityPlugin \
         custom/plugins/MuckiFacilityMenuPlugin \
-        custom/plugins/MuckiLogPlugin
+        custom/plugins/MuckiLogPlugin \
+        custom/plugins/MuckiSafeAgentPlugin
 
 # muckidrive does not commit a composer.lock, so the composer step below must
 # re-resolve on every build. Docker cannot see that Packagist changed: without
@@ -81,15 +86,18 @@ RUN rm -rf custom/muckiware/restic \
 # The CI workflow passes a unique value per run.
 ARG CACHE_BUST=local
 
-# Plugins + shopware/deployment-helper from Packagist. custom/apps, custom/plugins and custom/static-plugins
-# are referenced by composer.json path repositories — create them so composer
-# does not fail on missing dirs.
+# Plugins + shopware/deployment-helper from Packagist in ONE composer require:
+# if the pinned plugin does not fit the others, the whole resolution fails and
+# no half-updated plugin set reaches the image. custom/apps, custom/plugins and
+# custom/static-plugins are referenced by composer.json path repositories —
+# create them so composer does not fail on missing dirs.
 RUN echo "composer resolve: ${CACHE_BUST}" \
  && mkdir -p custom/apps custom/plugins custom/static-plugins \
  && composer require \
         muckiware/facility-plugin:"${FACILITY_PLUGIN_VERSION}" \
         muckiware/facility-menu-plugin:"${FACILITY_MENU_PLUGIN_VERSION}" \
         muckiware/log-plugin:"${LOG_PLUGIN_VERSION}" \
+        muckiware/mucki-safe-agent-plugin:"${AGENT_PLUGIN_VERSION}" \
         shopware/deployment-helper:"${DEPLOYMENT_HELPER_VERSION}" \
         --no-interaction --no-scripts \
  && composer dump-autoload --optimize \
