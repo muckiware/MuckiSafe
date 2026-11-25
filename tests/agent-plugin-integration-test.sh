@@ -25,7 +25,7 @@ readonly WAKEUP_MOUNT='${MUCKI_AGENT_WAKEUP_PATH:-/var/lib/mucki-agent/wakeup}:/
 readonly KEYRING='{"active":1,"keys":{"1":"0000000000000000000000000000000000000000000000000000000000000000"}}'
 TMP_DIR="$(mktemp -d)"
 readonly TMP_DIR
-trap 'rm -rf "$TMP_DIR"' EXIT
+trap 'cleanup_probe; rm -rf "$TMP_DIR"' EXIT
 IMAGE=""
 FAILURES=0
 
@@ -218,6 +218,61 @@ EOF
 )"
     docker run --rm --entrypoint bash "$IMAGE" -c "$script" >"$TMP_DIR/image.log" 2>&1 ||
         fail "image $IMAGE: $(tr '\n' ' ' <"$TMP_DIR/image.log")"
+    check_wakeup_write
+}
+
+# --- wakeup write probe -----------------------------------------------------
+
+readonly PROBE_PROJECT="muckisafe-wakeup-probe-$$"
+PROBE_STARTED=false
+
+# probe_compose ARGS...: docker compose with IMAGE for app and scheduler, the
+# probe directory as wakeup path and an own project (no real volumes touched).
+# Only the docker client settings pass through, so the same daemon as for
+# `docker run` is used (rootless, contexts); no real .env is read.
+probe_compose() {
+    env -i PATH="$PATH" HOME="$TMP_DIR" MUCKI_AGENT_WAKEUP_PATH="$TMP_DIR/wakeup" \
+        DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}" \
+        ${DOCKER_HOST:+DOCKER_HOST="$DOCKER_HOST"} ${DOCKER_CONTEXT:+DOCKER_CONTEXT="$DOCKER_CONTEXT"} \
+        docker compose --project-directory "$REPO_ROOT" -p "$PROBE_PROJECT" \
+        -f docker-compose.yml -f "$TMP_DIR/probe.override.yml" --env-file "$TMP_DIR/empty.env" "$@"
+}
+
+# probe_directory SCRIPT: runs SCRIPT as root on the probe directory (/probe)
+# inside a container, so the host needs no sudo.
+probe_directory() {
+    docker run --rm --user 0 --entrypoint sh -v "$TMP_DIR/wakeup:/probe" "$IMAGE" -c "$1"
+}
+
+# cleanup_probe: removes the probe project and opens the probe directory for
+# the EXIT trap. Runs on every exit, also after Ctrl+C. chmod instead of chown:
+# with rootless docker or userns-remap a chown maps to a foreign host owner.
+cleanup_probe() {
+    [ "$PROBE_STARTED" = true ] || return 0
+    probe_compose down --volumes >/dev/null 2>&1 || true
+    probe_directory 'rm -rf /probe/* && chmod 0777 /probe' >/dev/null 2>&1 || true
+}
+
+# check_wakeup_write: app and scheduler write a wakeup file as www-data into
+# a directory provisioned like install.sh does it (root:33, 0770). Proves the
+# ownership contract only on Linux: Docker Desktop (macOS/Windows) does not
+# enforce host directory ownership on bind mounts.
+check_wakeup_write() {
+    mkdir -p "$TMP_DIR/wakeup"
+    : >"$TMP_DIR/empty.env"
+    printf 'services:\n  app:\n    image: "%s"\n  scheduler:\n    image: "%s"\n' "$IMAGE" "$IMAGE" >"$TMP_DIR/probe.override.yml"
+    PROBE_STARTED=true
+    if ! probe_directory 'chown 0:33 /probe && chmod 0770 /probe' >"$TMP_DIR/probe.log" 2>&1; then
+        fail "cannot prepare the wakeup probe directory: $(tr '\n' ' ' <"$TMP_DIR/probe.log")"
+        return
+    fi
+    # Same steps as WakeupWriter: temp file, then rename to <id>.ready.
+    local probe='set -e; [ "$(id -un)" = www-data ]; cd /var/run/mucki-agent/wakeup; : > "probe-$$.tmp"; mv "probe-$$.tmp" "probe-$$.ready"; rm "probe-$$.ready"'
+    probe_compose run --rm --no-deps -T --user www-data --entrypoint sh app -c "$probe" >"$TMP_DIR/probe.log" 2>&1 ||
+        fail "app cannot write wakeup files as www-data: $(tail -n 3 "$TMP_DIR/probe.log" | tr "\n" " ")"
+    # The scheduler runs as www-data by itself: no --user override.
+    probe_compose run --rm --no-deps -T --entrypoint sh scheduler -c "$probe" >"$TMP_DIR/probe.log" 2>&1 ||
+        fail "scheduler cannot write wakeup files as www-data: $(tail -n 3 "$TMP_DIR/probe.log" | tr "\n" " ")"
 }
 
 main() {
