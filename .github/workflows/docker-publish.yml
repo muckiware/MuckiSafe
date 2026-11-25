@@ -1,8 +1,8 @@
 name: Build and publish the MuckiSafe Docker image
 
 # The image combines the muckidrive platform (github.com/muckiware/muckidrive)
-# with the Muckiware facility and logging plugins into a ready-to-run backup
-# server. This workflow checks out MuckiSafe (Dockerfile, entrypoint, compose),
+# with the Muckiware facility, logging and agent plugins into a ready-to-run
+# backup server. This workflow checks out MuckiSafe (Dockerfile, entrypoint, compose),
 # clones muckidrive into ./muckidrive as the application source and builds
 # ghcr.io/muckiware/muckisafe.
 #
@@ -29,6 +29,7 @@ on:
       - muckilog-plugin-release
       - muckifacility-plugin-release
       - muckifacility-menu-plugin-release
+      - muckisafe-agent-plugin-release
   workflow_dispatch:
     inputs:
       muckidrive_ref:
@@ -96,17 +97,20 @@ jobs:
 
       # Platform: the latest muckidrive release, unless an explicit ref
       # (platform release event or manual input) is given.
-      # Plugins: composer constraints. "*" lets composer pick the newest
-      # stable release of each plugin that is compatible with the others, so
-      # a plugin release can never break the build by being pinned next to a
-      # sibling that does not accept it yet. Only the plugin whose release
-      # triggered this run is pinned to exactly that version - the build then
-      # fails loudly instead of silently shipping an older version.
+      # Plugins: composer constraints, resolved by
+      # .github/scripts/resolve-plugin-versions.sh. "*" lets composer pick the
+      # newest stable release of each plugin that is compatible with the
+      # others, so a plugin release can never break the build by being pinned
+      # next to a sibling that does not accept it yet. Only the plugin whose
+      # release triggered this run is pinned to exactly that version - the
+      # build then fails loudly instead of silently shipping an older version.
+      # A plugin release event with a foreign package or an invalid ref fails.
       # Values reach the shell via env, never interpolated into the command,
       # to avoid command injection through event payloads and inputs.
       - name: Resolve component versions
         env:
           EXPLICIT_MUCKIDRIVE_REF: ${{ github.event.client_payload.muckidrive_ref || github.event.inputs.muckidrive_ref }}
+          EVENT_ACTION: ${{ github.event_name == 'repository_dispatch' && github.event.action || '' }}
           TRIGGER_PACKAGE: ${{ github.event.client_payload.package }}
           TRIGGER_REF: ${{ github.event.client_payload.ref }}
         run: |
@@ -120,35 +124,15 @@ jobs:
             exit 1
           fi
 
-          FACILITY_PLUGIN_VERSION='*'
-          FACILITY_MENU_PLUGIN_VERSION='*'
-          LOG_PLUGIN_VERSION='*'
+          # Fails the run on an invalid plugin release payload.
+          PLUGIN_VERSIONS="$(.github/scripts/resolve-plugin-versions.sh)"
 
-          if [ -n "$TRIGGER_PACKAGE" ]; then
-            echo "Triggered by ${TRIGGER_PACKAGE} ${TRIGGER_REF}."
-            case "$TRIGGER_PACKAGE" in
-              muckiware/facility-plugin|muckiware/facility-menu-plugin|muckiware/log-plugin)
-                if ! printf '%s' "$TRIGGER_REF" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
-                  echo "::error::Trigger ref '${TRIGGER_REF}' is not a release version (vX.Y.Z)."
-                  exit 1
-                fi
-                PINNED="${TRIGGER_REF#v}"
-                case "$TRIGGER_PACKAGE" in
-                  muckiware/facility-plugin)      FACILITY_PLUGIN_VERSION="$PINNED" ;;
-                  muckiware/facility-menu-plugin) FACILITY_MENU_PLUGIN_VERSION="$PINNED" ;;
-                  muckiware/log-plugin)           LOG_PLUGIN_VERSION="$PINNED" ;;
-                esac
-                ;;
-            esac
-          fi
-
-          echo "muckidrive ${MUCKIDRIVE_REF}, facility-plugin '${FACILITY_PLUGIN_VERSION}', facility-menu-plugin '${FACILITY_MENU_PLUGIN_VERSION}', log-plugin '${LOG_PLUGIN_VERSION}'"
+          echo "muckidrive ${MUCKIDRIVE_REF}"
+          echo "${PLUGIN_VERSIONS}"
 
           {
             echo "MUCKIDRIVE_REF=${MUCKIDRIVE_REF}"
-            echo "FACILITY_PLUGIN_VERSION=${FACILITY_PLUGIN_VERSION}"
-            echo "FACILITY_MENU_PLUGIN_VERSION=${FACILITY_MENU_PLUGIN_VERSION}"
-            echo "LOG_PLUGIN_VERSION=${LOG_PLUGIN_VERSION}"
+            echo "${PLUGIN_VERSIONS}"
           } >> "$GITHUB_ENV"
 
       - name: Clone muckidrive platform (application source)
@@ -205,6 +189,7 @@ jobs:
             FACILITY_PLUGIN_VERSION=${{ env.FACILITY_PLUGIN_VERSION }}
             FACILITY_MENU_PLUGIN_VERSION=${{ env.FACILITY_MENU_PLUGIN_VERSION }}
             LOG_PLUGIN_VERSION=${{ env.LOG_PLUGIN_VERSION }}
+            AGENT_PLUGIN_VERSION=${{ env.AGENT_PLUGIN_VERSION }}
             CACHE_BUST=${{ github.run_id }}-${{ github.run_attempt }}
           push: ${{ steps.plan.outputs.publish == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
