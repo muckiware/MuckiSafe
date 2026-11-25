@@ -1,2 +1,9 @@
 .env
 .DS_Store
+# Local IDE settings
+.idea/
+# Local data: restic backup repositories of docker-compose.override.yml
+# (default BACKUP_REPOS_PATH/RESTORE_REPOS_PATH) and the muckidrive build clone
+/backup-repos/
+/restore-repos/
+/muckidrive/
