@@ -1,5 +1,16 @@
 # MuckiSafe — Docker distribution
 
+MuckiSafe serves a complete Backup & Restore solution, running in a ready-to-run Docker image with an administration UI for to manage all you backups from everywhere in your local network. 
+- An agent-service on the Docker host executes pre/post/finally actions of a backup (stop a service, dump a database, …) and can be installed on any Linux host.
+- The backups will be created by the restic (https://restic.readthedocs.io) backup tool and are stored in a repository on the host
+- The backups are encrypted by a password. 
+- The repository can be on any local disk, network share or cloud storage. 
+- A mirror function can be copied on a S3 storage, so you have a second copy of your backups. 
+- Its included a scheduler setup for each back configuration for perform automatically backups or database dumps.
+- Restore selected backup snapshots from the administration UI or by command line.
+- User management with roles and permissions for the administration UI.
+
+
 **MuckiSafe** packages [muckidrive](https://github.com/muckiware/muckidrive) — the
 Shopware-6.7-core based application platform **without shop context** — together with
 the Muckiware facility, logging and agent plugins into a ready-to-run Docker image:
