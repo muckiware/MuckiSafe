@@ -17,6 +17,7 @@
 #   - muckiware/mucki-safe-agent-plugin (MuckiSafeAgentPlugin): control plane
 #     of the MuckiSafe host agent. Only the PHP plugin is installed; the Go
 #     agent is released separately and runs on the host, never in the image.
+#   - muckiware/muckisafe-plugin        (MuckiSafePlugin)
 # Their versions are composer constraints (build args below). The default "*"
 # lets composer pick the newest stable release of each plugin that fits the
 # other plugins' requirements, so plugin releases never need a change here.
@@ -36,6 +37,7 @@ ARG FACILITY_PLUGIN_VERSION=*
 ARG FACILITY_MENU_PLUGIN_VERSION=*
 ARG LOG_PLUGIN_VERSION=*
 ARG AGENT_PLUGIN_VERSION=*
+ARG MUCKISAFE_PLUGIN_VERSION=*
 ARG DEPLOYMENT_HELPER_VERSION=0.1.11
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -77,7 +79,8 @@ RUN rm -rf custom/muckiware/restic \
         custom/plugins/MuckiFacilityPlugin \
         custom/plugins/MuckiFacilityMenuPlugin \
         custom/plugins/MuckiLogPlugin \
-        custom/plugins/MuckiSafeAgentPlugin
+        custom/plugins/MuckiSafeAgentPlugin \
+        custom/plugins/MuckiSafePlugin
 
 # muckidrive does not commit a composer.lock, so the composer step below must
 # re-resolve on every build. Docker cannot see that Packagist changed: without
@@ -98,6 +101,7 @@ RUN echo "composer resolve: ${CACHE_BUST}" \
         muckiware/facility-menu-plugin:"${FACILITY_MENU_PLUGIN_VERSION}" \
         muckiware/log-plugin:"${LOG_PLUGIN_VERSION}" \
         muckiware/mucki-safe-agent-plugin:"${AGENT_PLUGIN_VERSION}" \
+        muckiware/muckisafe-plugin:"${MUCKISAFE_PLUGIN_VERSION}" \
         shopware/deployment-helper:"${DEPLOYMENT_HELPER_VERSION}" \
         --no-interaction --no-scripts \
  && composer dump-autoload --optimize \
