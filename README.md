@@ -30,13 +30,15 @@ What you get:
   the MuckiSafe host agent: provisioning, declarative actions, Facility backup hooks
   and job queue. The Go agent itself is released separately and runs on the host;
   the image contains neither the agent nor a Go toolchain.
+- **MuckiSafePlugin** (`muckiware/muckisafe-plugin`) — MuckiSafe extension of the
+  administration
 - **Node.js 22** and **Composer 2.7.7** inside the container for console and build tasks
 - **MySQL 8.4** and a **Supercronic scheduler** for Shopware background jobs
 - Optional **SSH access** as `root`, secured exclusively with one or more public keys
 - First-boot installation: system + plugins + admin user are created automatically from
   environment variables — no SQL dump, no manual `system:install`
 
-Every release contains the newest mutually compatible releases of the four
+Every release contains the newest mutually compatible releases of the five
 plugins; the exact versions are listed in the
 [release notes](https://github.com/muckiware/MuckiSafe/releases) and in
 `/var/www/html/.muckisafe-versions` inside the container.
@@ -495,9 +497,10 @@ The build context is the MuckiSafe repository with the muckidrive platform clone
 into `./muckidrive` (the CI workflow does exactly this). The Dockerfile copies
 the platform skeleton from `muckidrive/`, then adds the Muckiware plugins at
 build time via one `composer require` from Packagist (MuckiFacilityPlugin,
-MuckiFacilityMenuPlugin, MuckiLogPlugin, MuckiSafeAgentPlugin). Their versions
-are composer constraints passed as build args (`FACILITY_PLUGIN_VERSION`,
-`FACILITY_MENU_PLUGIN_VERSION`, `LOG_PLUGIN_VERSION`, `AGENT_PLUGIN_VERSION`);
+MuckiFacilityMenuPlugin, MuckiLogPlugin, MuckiSafeAgentPlugin, MuckiSafePlugin).
+Their versions are composer constraints passed as build args
+(`FACILITY_PLUGIN_VERSION`, `FACILITY_MENU_PLUGIN_VERSION`, `LOG_PLUGIN_VERSION`,
+`AGENT_PLUGIN_VERSION`, `MUCKISAFE_PLUGIN_VERSION`);
 the default `*` makes composer pick the newest stable release of each plugin
 that is compatible with the others. Pass e.g.
 `--build-arg FACILITY_PLUGIN_VERSION=0.9.0` to pin one. Local plugin checkouts
@@ -536,13 +539,13 @@ plugin versions inside the image.
 | Trigger | Result |
 |---|---|
 | Git tag `vX.Y.Z` pushed manually (changes to MuckiSafe itself) | release `vX.Y.Z` |
-| Release of muckidrive, core, master, MuckiLogPlugin, MuckiFacilityPlugin, MuckiFacilityMenuPlugin or MuckiSafeAgentPlugin | next patch release, created automatically |
+| Release of muckidrive, core, master, MuckiLogPlugin, MuckiFacilityPlugin, MuckiFacilityMenuPlugin, MuckiSafeAgentPlugin or MuckiSafePlugin | next patch release, created automatically |
 | *Run workflow* on `main` (optional `muckidrive_ref` input) | next patch release |
 | Push to `main`, pull request | test build (`linux/amd64`), nothing is published |
 
 Every build uses the latest release tag of muckidrive; only an explicit
 `muckidrive_ref` (platform release event or manual input) overrides it.
-`muckiware/core`, `muckiware/master` and the four plugins are resolved by
+`muckiware/core`, `muckiware/master` and the five plugins are resolved by
 composer at build time (muckidrive does not commit a `composer.lock`): each
 plugin gets its newest stable release that is compatible with the others. A
 plugin release pins only that plugin to the released version, so the build
@@ -565,6 +568,7 @@ The component repositories start a release with a `repository_dispatch` event:
 | [muckiware/MuckiFacilityPlugin](https://github.com/muckiware/MuckiFacilityPlugin) | `muckifacility-plugin-release` | `package`, `ref` |
 | [muckiware/MuckiFacilityMenuPlugin](https://github.com/muckiware/MuckiFacilityMenuPlugin) | `muckifacility-menu-plugin-release` | `package`, `ref` |
 | [muckiware/MuckiSafeAgentPlugin](https://github.com/muckiware/MuckiSafeAgentPlugin) | `muckisafe-agent-plugin-release` | `package` (`muckiware/mucki-safe-agent-plugin`), `ref` |
+| MuckiSafePlugin repository | `muckisafe-plugin-release` | `package` (`muckiware/muckisafe-plugin`), `ref` |
 
 Releases are queued, so components released together do not build in parallel
 or receive the same version number; when several are waiting, only the newest

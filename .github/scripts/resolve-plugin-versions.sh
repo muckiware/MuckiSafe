@@ -19,6 +19,7 @@ FACILITY_PLUGIN_VERSION='*'
 FACILITY_MENU_PLUGIN_VERSION='*'
 LOG_PLUGIN_VERSION='*'
 AGENT_PLUGIN_VERSION='*'
+MUCKISAFE_PLUGIN_VERSION='*'
 
 EVENT_ACTION="${EVENT_ACTION:-}"
 TRIGGER_PACKAGE="${TRIGGER_PACKAGE:-}"
@@ -36,6 +37,7 @@ expected_package() {
         muckifacility-menu-plugin-release) echo muckiware/facility-menu-plugin ;;
         muckilog-plugin-release)           echo muckiware/log-plugin ;;
         muckisafe-agent-plugin-release)    echo muckiware/mucki-safe-agent-plugin ;;
+        muckisafe-plugin-release)          echo muckiware/muckisafe-plugin ;;
     esac
 }
 
@@ -59,6 +61,7 @@ if [ -n "$expected" ]; then
         muckiware/facility-menu-plugin)    FACILITY_MENU_PLUGIN_VERSION="$version" ;;
         muckiware/log-plugin)              LOG_PLUGIN_VERSION="$version" ;;
         muckiware/mucki-safe-agent-plugin) AGENT_PLUGIN_VERSION="$version" ;;
+        muckiware/muckisafe-plugin)        MUCKISAFE_PLUGIN_VERSION="$version" ;;
     esac
 fi
 
@@ -66,3 +69,4 @@ printf 'FACILITY_PLUGIN_VERSION=%s\n' "$FACILITY_PLUGIN_VERSION"
 printf 'FACILITY_MENU_PLUGIN_VERSION=%s\n' "$FACILITY_MENU_PLUGIN_VERSION"
 printf 'LOG_PLUGIN_VERSION=%s\n' "$LOG_PLUGIN_VERSION"
 printf 'AGENT_PLUGIN_VERSION=%s\n' "$AGENT_PLUGIN_VERSION"
+printf 'MUCKISAFE_PLUGIN_VERSION=%s\n' "$MUCKISAFE_PLUGIN_VERSION"
